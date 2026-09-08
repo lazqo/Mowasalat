@@ -18,11 +18,12 @@ Start with the plan: [docs/PLAN.md](docs/PLAN.md).
 | Path | What |
 |---|---|
 | `packages/corridor/` | Corridor, matching and privacy library — the reference implementation ([README](packages/corridor/README.md)) |
+| `services/api/` | Backend: live state, matching, aggregates, and the enforcement that keeps coordinates off the server ([README](services/api/README.md)) |
 | `countries/jo/` | Jordan country pack: policy, and the five pilot lines ([README](countries/jo/README.md)) |
 | `docs/PLAN.md` | Product and engineering plan |
 
-Still to come: the two Flutter apps, the NestJS API, the ops admin with its
-corridor editor, and the self-hosted map stack.
+Still to come: the two Flutter apps, the ops admin with its corridor editor,
+Postgres and Redis, and the self-hosted map stack.
 
 ## Getting started
 
@@ -30,6 +31,16 @@ Node 22.6 or newer. No dependencies and no build step — TypeScript runs direct
 through Node's type stripping.
 
 ```
-npm test                  # corridor library, 33 tests
+npm test                  # 87 tests across the corridor library and the API
+npm run api               # start the API on :3000
 npm run validate:packs    # structural check on the Jordan pack
+npm run trace -- <route.json> <trace.json...>   # build a corridor from GPS traces
 ```
+
+## The one property worth knowing about
+
+No coordinate ever reaches the server. Positions travel as a line, a direction,
+a remaining distance and a zone, all computed on the device. That is enforced
+rather than intended — strict schemas reject coordinate fields, the logger
+refuses to write one, and the server declines positions finer than the country's
+policy band. See [services/api/README.md](services/api/README.md).

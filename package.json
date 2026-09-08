@@ -2,10 +2,17 @@
   "name": "mowasalat",
   "private": true,
   "type": "module",
-  "workspaces": ["packages/*", "services/*"],
-  "engines": { "node": ">=22.6" },
+  "workspaces": [
+    "packages/*",
+    "services/*"
+  ],
+  "engines": {
+    "node": ">=22.6"
+  },
   "scripts": {
-    "test": "node --test packages/corridor/test/*.test.ts",
-    "validate:packs": "node packages/corridor/src/validate-pack.ts countries/jo"
+    "test": "node --test packages/corridor/test/*.test.ts services/api/test/*.test.ts",
+    "validate:packs": "node packages/corridor/src/validate-pack.ts countries/jo",
+    "api": "node services/api/src/http.ts",
+    "trace": "node packages/corridor/src/trace-to-corridor.ts"
   }
 }
