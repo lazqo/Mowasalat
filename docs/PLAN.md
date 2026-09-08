@@ -1,6 +1,8 @@
 # Mowasalat (مواصلات) — Product & Engineering Plan
 
-**Status:** Draft v2 · **First country:** Jordan (pilot: Irbid) · **Second:** Syria · **Later:** other countries
+**Status:** Draft v3 · **First country:** Jordan (pilot: Irbid) · **Second:** Syria · **Later:** other countries
+
+> **Changes in v3.** The open decisions are resolved, using one test: *does this cause problems when we cross a border?* (§16). Trajectory storage is ruled out permanently, and a proper aggregate layer replaces it so expansion planning loses nothing (§6.3). Country packs now carry **policy as well as data**, so per-country differences never become code forks (§11).
 
 > **Changes in v2.** Driver verification no longer assumes drivers hold shareable licence or permit documents (§5). Location privacy is now a designed architecture rather than a policy promise: raw GPS coordinates never leave either phone (§6).
 
@@ -150,15 +152,39 @@ A useful side effect: the payload is two numbers instead of a coordinate pair pl
 - **No trip trajectory table exists in the schema.** This is stronger than a retention policy — there is nothing to forget to purge, and no migration can accidentally start retaining it.
 - Aggregates (requests and trips per route per hour) are **incremented in flight**, never derived from a stored trail.
 - Trip and request rows hold a route, timestamps, and a status. They are deleted 24 hours after completion.
-- The cost we accept: we cannot replay yesterday, debug from historical traces, or offer fine-grained analytics. Coarse counters are all we get. That is the right trade and it should be a conscious one (§17).
+**This is now decided and is not revisited** (§16). The reason is expansion, not only ethics: a stored movement trail turns every new country into a legal negotiation and a political target, while costing storage that grows with every bus-second forever. It is also the only irreversible direction — we can add storage later if we are ever wrong, but we can never un-store data we already hold, and we can never un-break the promise. What we give up is per-individual replay and post-hoc forensic debugging. §6.3 explains why that costs expansion planning nothing.
 
-### 6.3 Unlinkability: you cannot follow the same person across days
+### 6.3 Planning data without a trail
+
+The obvious objection to §6.2 is that expansion needs data: entering a new city means knowing where demand is, which routes are underserved, and where people wait that no route serves. That objection is real, and it is answered without storing a single trail — because **planning needs aggregates, and aggregates never needed identity in the first place.**
+
+Counters are incremented at the moment an event happens; the event itself is then discarded. Nothing is keyed to a person, device, token or session.
+
+| Counter | Keyed by | What it answers |
+|---|---|---|
+| Demand | route, segment, hour | Where do people actually wait, and when? |
+| **Unserved demand** | origin area, searched destination, hour | **Which route should we add next?** The single most valuable expansion signal, and it needs no identity at all. |
+| Coverage gaps | area, hour | Where do searches return no route whatsoever? |
+| Route health | route, hour | Trips started, trips completed, median headway. |
+| Match quality | route, hour | Requests met by a bus vs requests that expired waiting. |
+
+Three rules keep this from quietly becoming a trail:
+
+1. **No counter may be keyed by any identifier of a person**, including a rotating token or a session.
+2. **Minimum cell size.** A bucket with fewer than *k* events in its period is suppressed or merged upward. A counter must never be able to describe one person's single journey.
+3. **Counters are append-only integers.** No raw event log sits behind them "just in case" — that log is exactly the trail we declined to keep.
+
+For the debugging we genuinely lose, the answer is **opt-in diagnostics**: a driver hitting a problem taps "report a problem", which uploads the app's local buffer *for that trip only*, with explicit consent, deleted once the issue is resolved. Consent-gated and bounded, rather than a standing trail kept in case someone eventually needs it.
+
+The result is that the privacy-maximal choice and the expansion-planning need are not actually in tension. Unserved-demand counters tell you which routes to open in city twelve better than trajectory replay would, because they measure the demand you are *failing* to serve rather than the trips you already serve.
+
+### 6.4 Unlinkability: you cannot follow the same person across days
 
 - **Passengers** send a rotating per-request token, not a device ID. Two requests by the same person on consecutive days are not linkable server-side.
 - **Drivers** get a pseudonym that rotates every trip. The mapping from account to trip pseudonym exists only in memory for the life of the trip, so the realtime layer never handles an account ID at all.
 - Consequence to accept: a passenger cannot "favourite" a driver she likes, and we cannot build reputation on a persistent driver identity visible to passengers. Trust is carried by the tier mark (§5.2), which the account holds privately.
 
-### 6.4 Resolution that adapts to density (k-anonymity)
+### 6.5 Resolution that adapts to density (k-anonymity)
 
 A pin showing "one person waiting" on an empty village road is a pin showing *a specific person*. So pin precision is not a constant:
 
@@ -166,21 +192,21 @@ A pin showing "one person waiting" on an empty village road is a pin showing *a 
 - Where fewer than **k** requests are active nearby, the request snaps to the **nearest known waiting point** — a village entrance, a junction, a shop — rather than any distinct position. The driver sees "passengers at the junction", which is all he needs.
 - The same rule applies to buses on rarely-served routes at quiet hours, where a single bus is effectively a single named driver.
 
-### 6.5 Limiting who can see what
+### 6.6 Limiting who can see what
 
 - A driver sees only requests **on his own active route, ahead of him, within a window** (about 15 km). There is no global view, for anyone, at any tier.
 - A passenger sees only buses on routes serving her chosen destination.
 - Read endpoints are rate-limited and bound to an active trip or an active request, so the national live picture cannot be enumerated by a script.
 - Ops staff see aggregate counters and a coarse live map. Access to anything finer is role-gated and logged.
 
-### 6.6 Controls the user actually holds
+### 6.7 Controls the user actually holds
 
 - Driver: tracking runs only between **ابدأ** and **خلصت**, under a foreground service with a permanent visible notification, plus a one-tap "go off air" that stops transmission instantly.
 - Passenger: cancelling a request removes it immediately, everywhere.
 - Neither app requests background location for the passenger role at all.
 - A single onboarding card, in plain Arabic, states honestly what is and is not sent — "we do not know your name, and we do not receive your location, only how far along the line you are". Say it in one sentence and one picture, per §10.
 
-### 6.7 What this does *not* protect against — stated plainly
+### 6.8 What this does *not* protect against — stated plainly
 
 - For up to 60 seconds, the server knows that an anonymous bus is somewhere along a route. That is inherent to the product; there is no version of this app without it.
 - A compromised or seized **phone** defeats all of the above. Device security is not ours to solve.
@@ -237,7 +263,7 @@ Country      id, code (JO, SY), name_ar, bounds, locale, phone_prefix, digits (e
 City         id, country_id, name_ar, center
 Hub          id, city_id, name_ar, location, aliases_ar[]           -- المجمع
 Destination  id, country_id, name_ar, location, aliases_ar[]         -- town/village/landmark
-WaitPoint    id, route_id, progress_m, name_ar                       -- junctions/village entrances, for §6.4
+WaitPoint    id, route_id, progress_m, name_ar                       -- junctions/village entrances, for §6.5
 Route        id, country_id, origin_hub_id, destination_id, name_ar,
              polyline (LineString), served_destination_ids[], typical_headway_min, active
 Vehicle      id, driver_id, type (coaster|minibus|service), colour, plate, show_plate (bool)
@@ -247,7 +273,10 @@ TripProgress (Redis, TTL 60s, no disk persistence)
              trip_pseudonym -> progress_m, speed_kph        -- NO lat/lng, NO driver_id
 RideRequest  id, request_token (rotating), route_id, destination_id, progress_bucket_m,
              status (waiting|matched|boarded|cancelled|expired), created_at, expires_at, pseudonym
-RouteStats   route_id, hour_bucket, requests, trips                  -- the only long-lived data
+-- the only long-lived data, all of it counters (§6.3):
+RouteStats   route_id, segment, hour_bucket, requests, trips, matched, expired
+Unserved     country_id, origin_area, destination_id, hour_bucket, count
+Coverage     country_id, area, hour_bucket, empty_searches
 ```
 
 Note what is absent and must stay absent: no trajectory table, no coordinate column on `Trip` or `RideRequest`, no stable device identifier, and no `driver_id` anywhere in the realtime layer.
@@ -262,7 +291,7 @@ The whole engine works in one dimension, which is what makes §6.1 possible.
 2. The phone asks the server for active trips on those routes. The query names routes, not a location.
 3. A trip is a **candidate** if its `progress_m` is *behind* the passenger's and within a configurable window (e.g. 15 km).
 4. ETA = remaining distance along the polyline ÷ recent average speed (fallback: OSRM duration on the route geometry, computed once and cached per route).
-5. On **"أنا مستني"** the request is stored with a bucketed progress value (§6.4) and published to every candidate trip's channel. Nearby requests collapse into one pin with a count.
+5. On **"أنا مستني"** the request is stored with a bucketed progress value (§6.5) and published to every candidate trip's channel. Nearby requests collapse into one pin with a count.
 6. Driver passing the request's position marks it **matched**; the passenger taps "ركبت" or the request expires. No explicit accept/decline step: keeping it "broadcast to all buses behind you" is simpler and matches how people actually board (first bus that comes).
 7. Driver progress is sent every 5 s when moving, 30 s when stopped, and not at all when off-route. The API rebroadcasts to clients subscribed to that route.
 
@@ -276,7 +305,7 @@ The whole engine works in one dimension, which is what makes §6.1 possible.
 - No free-text input except destination search; search has large, forgiving matching (aliases, common misspellings, dialect names).
 - Every destructive action (cancel, finish trip) needs a second tap on a confirm sheet. Nothing can be deleted by the user.
 - Voice: optional text-to-speech announcements for drivers ("راكب بعد كيلومترين"). Optional voice search for passengers (later).
-- Onboarding is three swipeable pictures, skippable; no tutorial text walls. One of the three is the privacy card from §6.6 — one sentence, one picture, no legal language.
+- Onboarding is three swipeable pictures, skippable; no tutorial text walls. One of the three is the privacy card from §6.7 — one sentence, one picture, no legal language.
 - Test with real people: at least 5 elderly and 5 children in Irbid before pilot launch.
 
 ---
@@ -287,9 +316,27 @@ A **country pack** is a versioned folder in the repo plus rows in the database:
 
 ```
 countries/
-  jo/  config.json (bounds, locale ar-JO, digits eastern, phone +962), strings.ar-JO.json, hubs.geojson, routes.geojson
-  sy/  config.json (bounds, locale ar-SY, digits eastern, phone +963), strings.ar-SY.json, hubs.geojson, routes.geojson
+  jo/  config.json, strings.ar-JO.json, hubs.geojson, routes.geojson
+  sy/  config.json, strings.ar-SY.json, hubs.geojson, routes.geojson
 ```
+
+**The pack carries policy, not just data.** This is the single most important structural decision for expansion: anything that differs between countries and lives in code becomes a fork the first time we cross a border. So `config.json` holds all of it.
+
+```jsonc
+{
+  "code": "JO", "locale": "ar-JO", "digits": "eastern", "phone_prefix": "+962",
+  "bounds": [...],
+  "residency_region": "me-central-1",     // where this country's database lives
+  "vouching_authorities": ["drivers_committee", "hub_supervisor", "field_ops"],
+  "plate_visibility": "opt_in",           // some regulators may later require display
+  "tier2_thresholds": { "trips": 12, "distinct_days": 5 },
+  "k_anonymity_min": 4,                   // §6.5 density floor
+  "retention_hours": 24,
+  "otp_channels": ["sms", "manual_vouch"] // manual path where SMS is unreliable
+}
+```
+
+A new country is then a data and policy exercise carried out by ops, not an engineering project. That is the test every future feature should be held to.
 
 - Strings are per-dialect overrides on top of a shared Arabic base (Jordan says المجمع, Syria often says الكراج).
 - Route data is imported from GeoJSON by the admin tool; ops can also draw/edit routes in the admin map.
@@ -303,6 +350,7 @@ countries/
 | Phase | Duration | What ships | Exit criteria |
 |---|---|---|---|
 | **0. Discovery** | 3 weeks | Field research in Irbid: ride 10+ routes with GPS logging, interview 15 drivers and 30 passengers at the New and Old Complex, meet the drivers' committee and check LTRC stance. Confirm what paperwork drivers actually hold (§5.1). Produce the first `jo` country pack with 5 routes. | Route GeoJSON for 5 routes; agreed pilot drivers (≥20); a written answer on driver documentation. |
+| **0b. Name check** | in parallel | Trademark and app-store search for the product name across JO, SY and the wider region (§16.1). | A name we can register and list everywhere we intend to go. |
 | **1. Foundations** | 4 weeks | Monorepo, CI, backend skeleton, country resolver, PostGIS schema, Redis live layer, on-device snapping library, admin route editor, self-hosted tiles + OSRM for Jordan. | Admin can import a route and see it on a map; snapping library passes accuracy tests against Phase 0 GPS logs; API passes integration tests. |
 | **2. MVP apps** | 6–8 weeks | Passenger and driver Flutter apps with the flows in §4.1, push, matching engine, tiered sign-up, Arabic UI, accessibility rules. | Internal end-to-end test: a driver on a real route sees a test passenger request and the passenger sees the bus approaching — with no coordinate present in any server log. |
 | **3. Irbid pilot** | 6 weeks | 20–50 drivers on 5 routes, open passenger beta via Play Store. Weekly iteration. | ≥40% of pilot drivers start ≥3 trips/week; ≥100 real requests/week; median wait time reported lower than baseline from Phase 0. |
@@ -330,8 +378,12 @@ Rough total to pilot launch: **~5 months** with the team below.
 | Passengers do not trust being tracked | The honest answer is architectural: we do not receive their location (§6.1). Say it in one sentence on the onboarding card and be able to prove it. |
 | Passengers open the app and see nothing | Route directory with hubs and typical frequency is there from day one; the "live" layer is a bonus. |
 | Fake requests / fake buses | Phone-bound accounts; passenger rate limits; requests expire; driver can flag; behavioural trust tier makes ghost buses visible over time. |
-| Someone scrapes the national live map | No global read endpoint exists; reads are bound to an active trip or request and rate-limited (§6.5). |
-| A single waiting passenger is identifiable | Density-adaptive resolution snapping to known waiting points (§6.4). |
+| Someone scrapes the national live map | No global read endpoint exists; reads are bound to an active trip or request and rate-limited (§6.6). |
+| A single waiting passenger is identifiable | Density-adaptive resolution snapping to known waiting points (§6.5). |
+| A new country's data-protection regime blocks or delays launch | The architecture *is* the compliance story: no names, no coordinates, no trail, one database per country in-region. Entering a country becomes a filing exercise rather than a re-engineering project. |
+| A government demands travel records | There is almost nothing to hand over, by design (§6.2). Say so publicly and be able to demonstrate it. Complying once, in any country, would end the product's premise in all of them. |
+| Brand collision blocks a store listing in a new market | Settle the name before crossing the first border (§16.1); a rebrand after users exist is far more expensive. |
+| A per-country difference gets hardcoded | Country packs carry policy, not just data (§11). Code review should reject any Jordan-specific constant that belongs in `config.json`. |
 | Regulators object | Keep the app neutral (no fares, no dispatch, no exclusivity, no licensing claims). Meet LTRC early. Position as a public-information tool. |
 | Map cost or availability | Self-hosted OSM stack from the start; no Google dependency, and no third party learns our users' map queries. |
 | Battery drain on driver phones | Adaptive GPS interval, foreground service with a clear notification, stop tracking when trip ends. |
@@ -363,21 +415,31 @@ Mowasalat/
 
 ---
 
-## 16. Decisions needed from you before Phase 1
+## 16. Decisions, resolved for expansion
 
-1. **Name and branding:** "Mowasalat" (مواصلات) — keep it? It is generic and clear, which fits the simplicity goal.
-2. **Verification tiers:** confirm the model in §5.2, and tell us **who can vouch** at the Irbid complex — the drivers' committee, a hub supervisor, or only our own field person for the pilot?
-3. **The analytics trade in §6.2:** storing no trajectories means no replay, no per-trip debugging, and only coarse counters for planning. This is the right call for privacy, but it is a permanent product limitation and it should be your decision, not an engineering default.
-4. **Plate visibility:** show plate to passengers by default (helps identify the bus) or opt-in only? (Recommendation: opt-in; show vehicle colour and type by default.)
-5. **Arabic label for Route:** الخط (what people say) vs المسار (formal). (Recommendation: الخط.)
-6. **Pilot routes:** which 5 routes out of the Irbid New Complex do we start with? Your local knowledge decides this.
-7. **Backend language:** TypeScript (recommended) or Go?
+You asked for whichever answer does not cause problems as we expand. Applying that single test settles almost all of them, and it settles most of them the same way.
 
----
+**The governing principle: if it differs by country, it is configuration, not a constant.** Nearly every open question above was really asking "what is the right answer for Jordan?", and the expansion-safe move is not to pick one answer but to move the question into the country pack (§11). What follows is therefore less a list of picks than one structural decision applied repeatedly.
+
+| Question | Decision | Why this survives crossing a border |
+|---|---|---|
+| **Trajectory storage** | **None, permanently.** Aggregates only (§6.3), with consent-gated diagnostics for debugging. | Every new country adds a data-protection regime; Jordan's Personal Data Protection Law (No. 24 of 2023) is the first of several. Holding no movement trail collapses most of that compliance surface into a paragraph. It also removes the political target — in Syria especially, a record of who travelled where is a targeting tool, and the only durable answer to a demand for it is to be structurally unable to comply. And it is the one choice that is irreversible in only one direction: we can add storage later, never un-store. |
+| **Planning analytics** | In-flight counters, including the unserved-demand signal (§6.3). | Gives expansion planning its primary input — *which route should we open next* — with no identity involved. The privacy choice costs the roadmap nothing. |
+| **Data residency** | One **database per country**, not one schema per country. | A country that later imposes data-localisation rules can be lifted to a new region without a migration or an emergency schema split. Cheap now, very expensive retrofitted. |
+| **Vouching authority** | Country-pack list, with an ops fallback always present. | Jordan has a drivers' committee at the complex. Another country may have nothing equivalent. Config, not code. |
+| **Verification tiers** | Model in §5.2 confirmed; Tier 2 thresholds are per country. | Route lengths and trip frequencies differ enough that a fixed "12 trips over 5 days" would be wrong somewhere. |
+| **Plate visibility** | Country-pack flag, defaulting to opt-in. | Some regulators may eventually require display; other jurisdictions treat a plate as personal data. Both are reachable without a release. |
+| **Route label** (الخط / المسار) | Country-pack string. الخط for Jordan. | Dialect already varies — Syria says الكراج where Jordan says المجمع. This was never a global decision. |
+| **Backend language** | TypeScript (NestJS). | Widest regional hiring pool, and nothing about it constrains us at this volume. Expansion is limited by route data and driver onboarding, never by the runtime. |
+
+### 16.1 Still genuinely yours
+
+1. **Pilot routes.** Which five out of the Irbid New Complex? Only local knowledge answers this, and it is the one input Phase 0 cannot start without.
+2. **The name — worth settling before Syria, not after.** "Mowasalat" (مواصلات) is the ordinary Arabic word for transport. That makes it instantly understood, which is why it fits the simplicity goal, but it also makes it effectively impossible to own: generic terms are weak trademarks, and at least one large state transport operator in the Gulf already trades under this exact name (Qatar's Mowasalat / Karwa — worth a formal trademark search). This is not a pilot problem; it is precisely an expansion problem: app-store name collisions, search competition, and a possible forced rebrand once you cross borders, which costs far more after you have users than before. My recommendation is to keep مواصلات as the descriptive Arabic label in the interface, and choose a distinctive brand name you can actually own for the product itself.
 
 ## 17. Immediate next steps
 
-1. Confirm the decisions in §16.
+1. Answer the two items in §16.1 — the five pilot routes, and whether to settle the brand name now.
 2. Start Phase 0 field work in Irbid. Add one question to the driver interviews: *what paperwork do you personally hold, and would you share any of it?* That answer settles §5 with evidence rather than assumption.
 3. In parallel, scaffold the monorepo (Phase 1) so the route editor is ready to receive the first GPS traces, and prototype the snapping library against those traces early — the whole privacy architecture rests on it working accurately on cheap hardware.
 4. Write the Arabic screen-by-screen UX spec in `docs/ux/` using the flows in §4.1 and the rules in §10.
