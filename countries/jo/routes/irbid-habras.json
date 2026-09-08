@@ -1,0 +1,70 @@
+{
+  "id": "jo-irbid-habras",
+  "nameAr": "إربد – حبراص",
+  "originNameAr": "إربد",
+  "destinationNameAr": "حبراص",
+  "bidirectional": true,
+  "provisional": true,
+  "_phase0": {
+    "note": "Placeholder geometry. Every coordinate below is a straight-line guess, not survey data. Phase 0 replaces it — see docs/PLAN.md §12.1.",
+    "hubConfirmed": false,
+    "roadsSurveyed": false,
+    "intermediateDestinationsCollected": false,
+    "waitPointsCollected": false,
+    "aliasesCollected": false,
+    "headwayObserved": false
+  },
+  "corridor": {
+    "widthM": 750,
+    "referencePaths": [
+      [
+        {
+          "lat": 32.5556,
+          "lng": 35.8497
+        },
+        {
+          "lat": 32.582132,
+          "lng": 35.839239
+        },
+        {
+          "lat": 32.608664,
+          "lng": 35.828778
+        },
+        {
+          "lat": 32.636,
+          "lng": 35.818
+        }
+      ]
+    ],
+    "zones": [
+      {
+        "seq": 0,
+        "nameAr": "إربد",
+        "kind": "origin_hub",
+        "centre": {
+          "lat": 32.5556,
+          "lng": 35.8497
+        },
+        "radiusM": 800
+      },
+      {
+        "seq": 1,
+        "nameAr": "حبراص",
+        "kind": "destination",
+        "centre": {
+          "lat": 32.636,
+          "lng": 35.818
+        },
+        "radiusM": 800
+      }
+    ]
+  },
+  "servedDestinations": [
+    {
+      "id": "jo-habras",
+      "nameAr": "حبراص",
+      "zoneSeq": 1
+    }
+  ],
+  "waitPoints": []
+}

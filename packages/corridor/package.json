@@ -1,0 +1,7 @@
+{
+  "name": "@mowasalat/corridor",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": { "test": "node --test test/*.test.ts" }
+}

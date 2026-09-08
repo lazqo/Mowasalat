@@ -1,0 +1,70 @@
+{
+  "id": "jo-irbid-malka",
+  "nameAr": "إربد – ملكا",
+  "originNameAr": "إربد",
+  "destinationNameAr": "ملكا",
+  "bidirectional": true,
+  "provisional": true,
+  "_phase0": {
+    "note": "Placeholder geometry. Every coordinate below is a straight-line guess, not survey data. Phase 0 replaces it — see docs/PLAN.md §12.1.",
+    "hubConfirmed": false,
+    "roadsSurveyed": false,
+    "intermediateDestinationsCollected": false,
+    "waitPointsCollected": false,
+    "aliasesCollected": false,
+    "headwayObserved": false
+  },
+  "corridor": {
+    "widthM": 750,
+    "referencePaths": [
+      [
+        {
+          "lat": 32.5556,
+          "lng": 35.8497
+        },
+        {
+          "lat": 32.593022,
+          "lng": 35.814819
+        },
+        {
+          "lat": 32.630444,
+          "lng": 35.779938
+        },
+        {
+          "lat": 32.669,
+          "lng": 35.744
+        }
+      ]
+    ],
+    "zones": [
+      {
+        "seq": 0,
+        "nameAr": "إربد",
+        "kind": "origin_hub",
+        "centre": {
+          "lat": 32.5556,
+          "lng": 35.8497
+        },
+        "radiusM": 800
+      },
+      {
+        "seq": 1,
+        "nameAr": "ملكا",
+        "kind": "destination",
+        "centre": {
+          "lat": 32.669,
+          "lng": 35.744
+        },
+        "radiusM": 800
+      }
+    ]
+  },
+  "servedDestinations": [
+    {
+      "id": "jo-malka",
+      "nameAr": "ملكا",
+      "zoneSeq": 1
+    }
+  ],
+  "waitPoints": []
+}

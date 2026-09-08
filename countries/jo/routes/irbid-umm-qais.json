@@ -1,0 +1,70 @@
+{
+  "id": "jo-irbid-umm-qais",
+  "nameAr": "إربد – أم قيس",
+  "originNameAr": "إربد",
+  "destinationNameAr": "أم قيس",
+  "bidirectional": true,
+  "provisional": true,
+  "_phase0": {
+    "note": "Placeholder geometry. Every coordinate below is a straight-line guess, not survey data. Phase 0 replaces it — see docs/PLAN.md §12.1.",
+    "hubConfirmed": false,
+    "roadsSurveyed": false,
+    "intermediateDestinationsCollected": false,
+    "waitPointsCollected": false,
+    "aliasesCollected": false,
+    "headwayObserved": false
+  },
+  "corridor": {
+    "widthM": 750,
+    "referencePaths": [
+      [
+        {
+          "lat": 32.5556,
+          "lng": 35.8497
+        },
+        {
+          "lat": 32.587775,
+          "lng": 35.795151
+        },
+        {
+          "lat": 32.61995,
+          "lng": 35.740602
+        },
+        {
+          "lat": 32.6531,
+          "lng": 35.6844
+        }
+      ]
+    ],
+    "zones": [
+      {
+        "seq": 0,
+        "nameAr": "إربد",
+        "kind": "origin_hub",
+        "centre": {
+          "lat": 32.5556,
+          "lng": 35.8497
+        },
+        "radiusM": 800
+      },
+      {
+        "seq": 1,
+        "nameAr": "أم قيس",
+        "kind": "destination",
+        "centre": {
+          "lat": 32.6531,
+          "lng": 35.6844
+        },
+        "radiusM": 800
+      }
+    ]
+  },
+  "servedDestinations": [
+    {
+      "id": "jo-umm-qais",
+      "nameAr": "أم قيس",
+      "zoneSeq": 1
+    }
+  ],
+  "waitPoints": []
+}

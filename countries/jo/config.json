@@ -1,0 +1,28 @@
+{
+  "code": "JO",
+  "nameAr": "الأردن",
+  "locale": "ar-JO",
+  "digits": "eastern",
+  "phone_prefix": "+962",
+  "bounds": { "minLat": 29.18, "minLng": 34.95, "maxLat": 33.38, "maxLng": 39.30 },
+
+  "residency_region": "me-central-1",
+  "vouching_authorities": ["drivers_committee", "hub_supervisor", "field_ops"],
+  "plate_visibility": "opt_in",
+  "tier2_thresholds": { "trips": 12, "distinct_days": 5 },
+  "default_corridor_width_m": 750,
+  "k_anonymity_min": 4,
+  "remaining_bucket_m": 250,
+  "retention_hours": 24,
+  "otp_channels": ["sms", "manual_vouch"],
+
+  "strings": {
+    "route": "الخط",
+    "hub": "المجمع",
+    "whereTo": "وين رايح؟",
+    "start": "ابدأ",
+    "finish": "خلصت",
+    "imWaiting": "أنا مستني هون",
+    "iBoarded": "ركبت"
+  }
+}

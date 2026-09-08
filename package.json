@@ -1,0 +1,11 @@
+{
+  "name": "mowasalat",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*", "services/*"],
+  "engines": { "node": ">=22.6" },
+  "scripts": {
+    "test": "node --test packages/corridor/test/*.test.ts",
+    "validate:packs": "node packages/corridor/src/validate-pack.ts countries/jo"
+  }
+}

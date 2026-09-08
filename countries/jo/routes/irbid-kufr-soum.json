@@ -1,0 +1,70 @@
+{
+  "id": "jo-irbid-kufr-soum",
+  "nameAr": "إربد – كفرسوم",
+  "originNameAr": "إربد",
+  "destinationNameAr": "كفرسوم",
+  "bidirectional": true,
+  "provisional": true,
+  "_phase0": {
+    "note": "Placeholder geometry. Every coordinate below is a straight-line guess, not survey data. Phase 0 replaces it — see docs/PLAN.md §12.1.",
+    "hubConfirmed": false,
+    "roadsSurveyed": false,
+    "intermediateDestinationsCollected": false,
+    "waitPointsCollected": false,
+    "aliasesCollected": false,
+    "headwayObserved": false
+  },
+  "corridor": {
+    "widthM": 750,
+    "referencePaths": [
+      [
+        {
+          "lat": 32.5556,
+          "lng": 35.8497
+        },
+        {
+          "lat": 32.588732,
+          "lng": 35.833959
+        },
+        {
+          "lat": 32.621864,
+          "lng": 35.818218
+        },
+        {
+          "lat": 32.656,
+          "lng": 35.802
+        }
+      ]
+    ],
+    "zones": [
+      {
+        "seq": 0,
+        "nameAr": "إربد",
+        "kind": "origin_hub",
+        "centre": {
+          "lat": 32.5556,
+          "lng": 35.8497
+        },
+        "radiusM": 800
+      },
+      {
+        "seq": 1,
+        "nameAr": "كفرسوم",
+        "kind": "destination",
+        "centre": {
+          "lat": 32.656,
+          "lng": 35.802
+        },
+        "radiusM": 800
+      }
+    ]
+  },
+  "servedDestinations": [
+    {
+      "id": "jo-kufr-soum",
+      "nameAr": "كفرسوم",
+      "zoneSeq": 1
+    }
+  ],
+  "waitPoints": []
+}

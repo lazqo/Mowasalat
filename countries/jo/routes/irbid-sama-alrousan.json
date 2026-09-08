@@ -1,0 +1,70 @@
+{
+  "id": "jo-irbid-sama-alrousan",
+  "nameAr": "إربد – سما الروسان",
+  "originNameAr": "إربد",
+  "destinationNameAr": "سما الروسان",
+  "bidirectional": true,
+  "provisional": true,
+  "_phase0": {
+    "note": "Placeholder geometry. Every coordinate below is a straight-line guess, not survey data. Phase 0 replaces it — see docs/PLAN.md §12.1.",
+    "hubConfirmed": false,
+    "roadsSurveyed": false,
+    "intermediateDestinationsCollected": false,
+    "waitPointsCollected": false,
+    "aliasesCollected": false,
+    "headwayObserved": false
+  },
+  "corridor": {
+    "widthM": 750,
+    "referencePaths": [
+      [
+        {
+          "lat": 32.5556,
+          "lng": 35.8497
+        },
+        {
+          "lat": 32.598962,
+          "lng": 35.845179
+        },
+        {
+          "lat": 32.642324,
+          "lng": 35.840658
+        },
+        {
+          "lat": 32.687,
+          "lng": 35.836
+        }
+      ]
+    ],
+    "zones": [
+      {
+        "seq": 0,
+        "nameAr": "إربد",
+        "kind": "origin_hub",
+        "centre": {
+          "lat": 32.5556,
+          "lng": 35.8497
+        },
+        "radiusM": 800
+      },
+      {
+        "seq": 1,
+        "nameAr": "سما الروسان",
+        "kind": "destination",
+        "centre": {
+          "lat": 32.687,
+          "lng": 35.836
+        },
+        "radiusM": 800
+      }
+    ]
+  },
+  "servedDestinations": [
+    {
+      "id": "jo-sama-alrousan",
+      "nameAr": "سما الروسان",
+      "zoneSeq": 1
+    }
+  ],
+  "waitPoints": []
+}
