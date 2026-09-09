@@ -7,7 +7,7 @@ logging a coordinate.
 ```
 npm run api                              # public endpoints only
 ADMIN_TOKEN=… PHONE_SALT=… npm run api   # with the ops admin at /admin
-npm test                                 # 88 API tests
+npm test                                 # 107 API tests
 ```
 
 No dependencies and no build step; TypeScript runs through Node's type
@@ -49,6 +49,7 @@ guard sits on the endpoints where a person could be located.
 | `live.ts` | Expiring in-memory state — the Redis stand-in, same contract |
 | `counters.ts` | Aggregates, with personal dimensions refused and thin cells suppressed |
 | `service.ts` | The domain layer. No HTTP in sight |
+| `stream.ts` | The push hub, coalescing, and stream tickets |
 | `pack.ts` | Reading and writing country packs, validated and atomic |
 | `admin.ts` | Ops: line and corridor editing, and the driver roster |
 | `editor.html` | The corridor editor served at `/admin` |
@@ -61,10 +62,38 @@ still holds for the transport; `http.ts` is deliberately thin so wrapping these
 same services in NestJS or Fastify touches nothing else. Keeping the domain free
 of a framework is also what lets `npm test` run with no install.
 
-**Push will use Server-Sent Events, not WebSockets.** The stream is one-way,
-which is all a bus position needs; SSE rides plain HTTP so it survives the
-proxies and captive portals a cheap phone meets, and it reconnects on its own.
-The client-to-server direction is ordinary POSTs. The endpoint is not built yet.
+**Push is Server-Sent Events, not WebSockets.** The stream is one-way, which is
+all a bus position needs; SSE rides plain HTTP so it survives the proxies and
+captive portals a cheap phone meets, and the browser reconnects it without any
+code from us. The client-to-server direction is ordinary POSTs.
+
+## Push
+
+```
+GET /stream/buses?ticket=…       passengers: bus positions on one line
+GET /stream/waiting?tripToken=…  drivers: waiting pins ahead on their own trip
+```
+
+**Streams are bound, not open.** The plan requires reads to be bound to an
+active trip or request so the national picture cannot be enumerated by a script
+(§6.6). A driver's stream is bound to his trip token. A passenger has no token
+before she has asked for anything, so the binding comes from the lookup she
+already makes: `POST /buses` hands back a `streamTicket` good for that line and
+direction only, and nothing else.
+
+**A stream sends bus scalars, not answers.** No gap, no ETA — the subscriber's
+phone already holds the corridor, so it computes both itself. That also means a
+streaming passenger never has to send her position at all.
+
+**Bursts collapse.** Buses report every five seconds, so a busy line would push
+several times a second to every passenger. Notifications are coalesced to at
+most one push per interval, with a trailing push so nothing is lost. A tested
+case fires ten updates inside one window and asserts fewer than ten pushes.
+
+Publishers say only "something on this line changed"; each subscriber then
+receives the current snapshot. At this scale that is simpler than diffing and it
+is self-healing — a missed notification is corrected by the next one.
+Subscriptions are released on disconnect, which is tested rather than assumed.
 
 ## The ops admin
 

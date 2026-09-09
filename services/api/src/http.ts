@@ -21,6 +21,7 @@ import { Admin, AdminError, NotFound } from "./admin.ts";
 import { CoordinateLeak } from "./guard.ts";
 import { InvalidRoute, Pack } from "./pack.ts";
 import { Service, type CountryPolicy } from "./service.ts";
+import { coalesce, Tickets, topicFor } from "./stream.ts";
 import {
   BadRequest,
   parseEndTrip,
@@ -87,12 +88,19 @@ export type ApiOptions = {
   adminToken?: string;
   /** Basemap style for the corridor editor. Replace with the self-hosted stack. */
   mapTiles?: string;
+  /** How often at most a stream may push. Buses report every 5 s. */
+  streamIntervalMs?: number;
+  /** Keeps idle connections alive through proxies that cut them. */
+  heartbeatMs?: number;
 };
 
 export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
   const service = options.service ?? new Service(policy);
   const admin = options.admin;
   const adminToken = options.adminToken;
+  const tickets = new Tickets();
+  const streamIntervalMs = options.streamIntervalMs ?? 2_000;
+  const heartbeatMs = options.heartbeatMs ?? 20_000;
 
   const routes: Route[] = [
     // --- passenger and driver: no coordinate may cross this boundary ---
@@ -132,7 +140,12 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
       admin: false,
       handler: (body) => {
         const b = parseFindBuses(body);
-        return { buses: service.findBuses(b.routeId, b.dir, b.remainingM, b.zoneSeq) };
+        // The ticket binds a stream to this line and direction, so streaming
+        // cannot be used to enumerate the whole network (§6.6).
+        return {
+          buses: service.findBuses(b.routeId, b.dir, b.remainingM, b.zoneSeq),
+          streamTicket: tickets.issue(b.routeId, b.dir),
+        };
       },
     },
     {
@@ -270,8 +283,54 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
     },
   ];
 
+  /**
+   * Opens a Server-Sent Events response that resends a snapshot whenever the
+   * line changes, and a comment heartbeat while it does not.
+   */
+  function openStream(
+    req: IncomingMessage,
+    res: ServerResponse,
+    topic: string,
+    snapshot: () => unknown,
+  ): void {
+    res.writeHead(200, {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-store",
+      connection: "keep-alive",
+      // Some reverse proxies buffer responses, which would hold events back
+      // until the connection closed.
+      "x-accel-buffering": "no",
+    });
+
+    // Tells the client how long to wait before reconnecting after a drop.
+    res.write("retry: 5000\n\n");
+
+    const push = () => {
+      if (res.writableEnded) return;
+      res.write(`data: ${JSON.stringify(snapshot())}\n\n`);
+    };
+
+    const trigger = coalesce(push, streamIntervalMs);
+    const unsubscribe = service.hub.subscribe(topic, trigger);
+    const heartbeat = setInterval(() => {
+      if (!res.writableEnded) res.write(": keep-alive\n\n");
+    }, heartbeatMs);
+
+    const close = () => {
+      clearInterval(heartbeat);
+      trigger.cancel();
+      unsubscribe();
+      if (!res.writableEnded) res.end();
+    };
+    req.on("close", close);
+    req.on("error", close);
+
+    push(); // the current picture, before anything changes
+  }
+
   const server = createServer(async (req, res) => {
-    const path = (req.url ?? "").split("?")[0];
+    const url = new URL(req.url ?? "/", "http://localhost");
+    const path = url.pathname;
     const segments = path.split("/").filter(Boolean);
     const method = req.method ?? "GET";
 
@@ -280,6 +339,34 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
     }
     if (method === "GET" && path === "/ops/report") {
       return send(res, 200, { cells: service.report() });
+    }
+
+    // --- push -------------------------------------------------------------
+
+    if (method === "GET" && path === "/stream/buses") {
+      const ticket = tickets.redeem(url.searchParams.get("ticket") ?? "");
+      if (!ticket) {
+        return send(res, 401, {
+          error: "a stream ticket is required; ask which buses are running first",
+        });
+      }
+      return openStream(req, res, topicFor(ticket.routeId, ticket.dir), () => ({
+        buses: service.busesOn(ticket.routeId, ticket.dir),
+      }));
+    }
+
+    if (method === "GET" && path === "/stream/waiting") {
+      const tripToken = url.searchParams.get("tripToken") ?? "";
+      const pins = service.pinsForTrip(tripToken);
+      if (pins === null) return send(res, 401, { error: "unknown or ended trip" });
+
+      // A driver's stream is bound to his own trip, so he sees what is ahead of
+      // him on his own line and nothing else, at any tier.
+      const mine = service.tripRoute(tripToken);
+      if (!mine) return send(res, 401, { error: "unknown or ended trip" });
+      return openStream(req, res, topicFor(mine.routeId, mine.dir), () => ({
+        pins: service.pinsForTrip(tripToken) ?? [],
+      }));
     }
 
     if (method === "GET" && (path === "/admin" || path === "/admin/")) {

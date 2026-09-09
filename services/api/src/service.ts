@@ -10,6 +10,7 @@ import { rankCandidates, type LiveTrip as MatchTrip, type PassengerFix } from ".
 import { Counters, hourBucket } from "./counters.ts";
 import { createLogger } from "./guard.ts";
 import { LiveState, type Clock } from "./live.ts";
+import { Hub, topicFor } from "./stream.ts";
 import { assertBucketed, BadRequest, type Direction } from "./wire.ts";
 
 export type CountryPolicy = {
@@ -33,12 +34,21 @@ export type WaitingPin = {
   zoneSeq: number;
 };
 
+/** What a stream sends about a bus. The subscriber computes gap and ETA itself. */
+export type BusPosition = {
+  pseudonym: string;
+  remainingM: number;
+  zoneSeq: number;
+  speedKph: number;
+};
+
 export class Service {
   private live: LiveState;
   private counters: Counters;
   private policy: CountryPolicy;
   private now: Clock;
   private log: ReturnType<typeof createLogger>;
+  readonly hub: Hub;
 
   constructor(policy: CountryPolicy, now: Clock = () => Date.now(), sink?: (l: string) => void) {
     this.policy = policy;
@@ -46,6 +56,7 @@ export class Service {
     this.live = new LiveState(now);
     this.counters = new Counters();
     this.log = createLogger(sink);
+    this.hub = new Hub();
   }
 
   // --- driver ------------------------------------------------------------
@@ -81,6 +92,7 @@ export class Service {
     const updated = this.live.updateTrip(tripToken, { routeId, dir, remainingM, zoneSeq, speedKph });
     if (!updated) throw new BadRequest("unknown or ended trip");
     this.counters.increment("demand", { routeId, dir, zoneSeq, hourBucket: hourBucket(this.now()) }, 0);
+    this.hub.publish(topicFor(routeId, dir));
   }
 
   /**
@@ -98,7 +110,10 @@ export class Service {
   }
 
   endTrip(tripToken: string, routeId?: string, dir?: Direction): void {
+    const ending = this.live.pseudonymFor(tripToken);
+    const wasOn = ending ? this.live.tripByPseudonym(ending) : undefined;
     if (!this.live.endTrip(tripToken)) throw new BadRequest("unknown or ended trip");
+    if (wasOn) this.hub.publish(topicFor(wasOn.routeId, wasOn.dir));
     if (routeId !== undefined && dir !== undefined) {
       this.counters.increment("line_health", {
         routeId,
@@ -173,6 +188,42 @@ export class Service {
     }));
   }
 
+  /**
+   * Bus positions on a line, for a stream subscriber.
+   *
+   * Unlike findBuses this takes no passenger position, because a streaming
+   * passenger never has to send one: her phone already holds the corridor, so
+   * it computes the gap and the ETA itself from these scalars.
+   */
+  busesOn(routeId: string, dir: Direction): BusPosition[] {
+    return this.live
+      .tripsOn(routeId, dir)
+      .map((t) => ({
+        pseudonym: t.pseudonym,
+        remainingM: t.remainingM,
+        zoneSeq: t.zoneSeq,
+        speedKph: t.speedKph,
+      }))
+      .sort((a, b) => a.remainingM - b.remainingM);
+  }
+
+  /** Which line and direction a trip token is currently running, if any. */
+  tripRoute(tripToken: string): { routeId: string; dir: Direction } | null {
+    const pseudonym = this.live.pseudonymFor(tripToken);
+    if (!pseudonym) return null;
+    const mine = this.live.tripByPseudonym(pseudonym);
+    return mine ? { routeId: mine.routeId, dir: mine.dir } : null;
+  }
+
+  /** The pins for a driver's own active trip, for a stream subscriber. */
+  pinsForTrip(tripToken: string, windowM = 15_000): WaitingPin[] | null {
+    const pseudonym = this.live.pseudonymFor(tripToken);
+    if (!pseudonym) return null;
+    const mine = this.live.tripByPseudonym(pseudonym);
+    if (!mine) return [];
+    return this.pinsFor(mine.routeId, mine.dir, mine.remainingM, windowM);
+  }
+
   /** Records that nobody serves a destination someone searched for. The expansion signal (§6.3). */
   recordUnservedSearch(area: string, destinationId: string): void {
     this.counters.increment("unserved", {
@@ -195,6 +246,7 @@ export class Service {
     const pseudonym = randomUUID().slice(0, 8);
     this.live.addRequest({ pseudonym, routeId, dir, destinationId, remainingM, zoneSeq });
     this.counters.increment("demand", { routeId, dir, zoneSeq, hourBucket: hourBucket(this.now()) });
+    this.hub.publish(topicFor(routeId, dir));
     return { pseudonym };
   }
 
@@ -204,6 +256,7 @@ export class Service {
 
   boarded(pseudonym: string, routeId: string, dir: Direction): void {
     this.live.cancelRequest(pseudonym);
+    this.hub.publish(topicFor(routeId, dir));
     this.counters.increment("match_quality", {
       routeId,
       dir,

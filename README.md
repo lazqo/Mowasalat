@@ -25,13 +25,18 @@ Start with the plan: [docs/PLAN.md](docs/PLAN.md).
 Still to come: the two Flutter apps, Postgres and Redis, OTP, and the
 self-hosted map stack.
 
+Live updates are pushed over Server-Sent Events: `GET /stream/buses` for
+passengers, `GET /stream/waiting` for drivers. Both are bound — a driver's
+stream to his trip, a passenger's to a ticket issued by the lookup she just
+made — so the network cannot be enumerated by a script.
+
 ## Getting started
 
 Node 22.6 or newer. No dependencies and no build step — TypeScript runs directly
 through Node's type stripping.
 
 ```
-npm test                  # 132 tests across the corridor library and the API
+npm test                  # 151 tests across the corridor library and the API
 npm run api               # start the API on :3000
 ADMIN_TOKEN=… PHONE_SALT=… npm run api   # also serves the ops admin at /admin
 npm run validate:packs    # structural check on the Jordan pack
