@@ -18,6 +18,8 @@ Start with the plan: [docs/PLAN.md](docs/PLAN.md).
 | Path | What |
 |---|---|
 | `packages/corridor/` | Corridor, matching and privacy library — the reference implementation ([README](packages/corridor/README.md)) |
+| `packages/core/` | Pure-Dart logic behind both apps: corridor matching, `/v1` client, realtime stream, trip state machine ([README](packages/core/README.md)) |
+| `apps/driver/` | The driver app — implemented, **not yet verified** ([README](apps/driver/README.md)) |
 | `services/api/` | Backend: live state, matching, aggregates, the ops admin and corridor editor, and the enforcement that keeps coordinates off the server ([README](services/api/README.md)) |
 | `countries/jo/` | Jordan country pack: policy, and the five pilot lines ([README](countries/jo/README.md)) |
 | `docs/PLAN.md` | Product and engineering plan |
@@ -25,7 +27,10 @@ Start with the plan: [docs/PLAN.md](docs/PLAN.md).
 The transport API is frozen at [`/v1`](docs/API.md) — the Flutter apps can be
 built against it without backend changes. Postgres holds the network and the roster; live movement stays in memory with a
 60-second expiry and is expected to be lost on restart, which is tested both
-ways. Still to come: the two Flutter apps and the self-hosted map stack.
+ways. The driver vertical slice is written. Its logic lives in `packages/core` as pure
+Dart and is analysed and tested here; the Flutter UI in `apps/driver` has never
+been built or run, because Flutter is not installed in the environment it was
+written in. Still to come: the passenger app and the self-hosted map stack.
 
 Live updates are pushed over Server-Sent Events: `GET /stream/buses` for
 passengers, `GET /stream/waiting` for drivers. Both are bound — a driver's

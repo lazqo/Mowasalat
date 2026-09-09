@@ -1,0 +1,12 @@
+{
+    "driverToken": "2v700bzBvVcvT_EjjdFj5U2kIhLbYsaL024tXI2Ixng",
+    "isNew": true,
+    "driver": {
+        "id": "drv-53e0efa2",
+        "phoneMasked": "\u2022\u2022\u2022 567",
+        "tier": 0,
+        "status": "active",
+        "routeIds": [],
+        "vouchedBy": null
+    }
+}

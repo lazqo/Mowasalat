@@ -1,0 +1,12 @@
+{
+    "buses": [
+        {
+            "pseudonym": "5d1b5f7c",
+            "remainingM": 8000,
+            "zoneSeq": 1,
+            "gapM": 3000,
+            "etaSeconds": 270
+        }
+    ],
+    "streamTicket": "5c357c84-bf69-4c1c-8f6f-6ea555a93f16"
+}

@@ -1,0 +1,4 @@
+{
+    "error": "coordinates are never accepted",
+    "field": "body.lat"
+}

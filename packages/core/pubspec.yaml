@@ -1,0 +1,16 @@
+name: mowasalat_core
+description: >-
+  Shared logic for the Mowasalat driver and passenger apps: corridor matching,
+  the transport API client, the realtime stream, and the trip state machine.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.5.0
+
+# Deliberately pure Dart, with no Flutter dependency. Everything that decides
+# anything lives here so it can be analysed and tested without a device, and the
+# apps stay a thin shell over it.
+dev_dependencies:
+  lints: ^4.0.0
+  test: ^1.25.0
