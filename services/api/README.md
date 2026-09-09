@@ -5,9 +5,10 @@ passengers to buses, and count aggregates — while never receiving, storing or
 logging a coordinate.
 
 ```
-npm run api                              # public endpoints only
-ADMIN_TOKEN=… PHONE_SALT=… npm run api   # with the ops admin at /admin
-npm test                                 # 107 API tests
+npm run api                                          # public endpoints only
+DATABASE_URL=… ADMIN_TOKEN=… PHONE_SALT=… npm run api   # with the ops admin at /admin
+npm run seed                                         # load a country pack into Postgres
+npm test                                             # 120 API tests
 ```
 
 No dependencies and no build step; TypeScript runs through Node's type
@@ -49,6 +50,10 @@ guard sits on the endpoints where a person could be located.
 | `live.ts` | Expiring in-memory state — the Redis stand-in, same contract |
 | `counters.ts` | Aggregates, with personal dimensions refused and thin cells suppressed |
 | `service.ts` | The domain layer. No HTTP in sight |
+| `db/schema.sql` | The durable half: network and roster. No trip or position table, deliberately |
+| `db/network.ts` | Countries, hubs, destinations, lines and corridors |
+| `db/roster.ts` | Drivers, vehicles, line assignments, verification state |
+| `db/seed.ts` | Country pack into database |
 | `stream.ts` | The push hub, coalescing, and stream tickets |
 | `pack.ts` | Reading and writing country packs, validated and atomic |
 | `admin.ts` | Ops: line and corridor editing, and the driver roster |
@@ -133,11 +138,55 @@ The editor page has not been rendered or clicked through — there is no browser
 in the environment it was written in. Its endpoints are tested; its interface is
 not.
 
+## What a restart keeps, and what it must not
+
+Postgres holds everything a restart must not lose: countries, hubs,
+destinations, lines and their corridors, zones, wait points, drivers, vehicles,
+driver-to-route assignments and verification state. A pilot that forgets which
+lines its drivers run, or demotes everyone the drivers' committee vouched for,
+is worse than useless.
+
+Live movement is deliberately **not** in Postgres. There is no trip table, no
+ride-request table and no position column anywhere in `schema.sql`, and that
+absence is the point (§6.2): a stored movement trail is the one thing the plan
+promises never to build. Trip progress, stream subscriptions and trip pseudonym
+mappings stay in memory under the existing TTLs and are expected to vanish on
+restart.
+
+`restart.test.ts` proves both halves rather than asserting them in prose. A
+"restart" there is a fresh `Admin` over the same database beside a brand new
+`Service` whose live state started empty — which is exactly what the process
+holds when it comes back:
+
+| Proven | |
+|---|---|
+| Assignments survive | a driver's lines, and their removal |
+| Lines survive | corridor width, zones, reference paths, wait points, imported geometry |
+| Verification survives | tier, who vouched, proven trips and days, blocked status |
+| Live movement does not | no bus, no request, and the old trip token is worthless |
+| Nothing locatable is stored | no coordinate column on `driver`, `vehicle` or `driver_route`; coordinates exist only on infrastructure — a hub, a village, a zone centre, a waiting point |
+| The schema stays clean | neither the live database nor `schema.sql` declares a trip, request or position table |
+| Push still works | a driver on a line read back from the database streams to a subscriber |
+
+The route model is persisted as decided (§9.1). A `route` row is the named line
+a person recognises; the corridor lives in `route_corridor` and `route_zone`
+because it is a geographic representation used on-device for matching, not a
+path the driver must follow. `driver_route` lets a driver hold several lines,
+and choosing exactly one line and one direction is a live decision the database
+plays no part in.
+
+Geometry is JSONB rather than PostGIS. Every spatial computation happens on the
+phone by design, so the server runs no spatial queries and PostGIS would earn
+nothing yet.
+
 ## Not built yet
 
 - The SSE endpoints for the passenger and driver streams.
 - Postgres. `live.ts` is in-memory; Redis replaces it behind the same contract.
 - OTP. The roster holds tiers and vouching, but nothing sends or checks a code.
-- Persistence for the roster. It is in memory, like live state; Postgres replaces it.
+- Redis. Live state is in-process, which is correct at pilot scale but means a
+  second instance would not share it. The contract in `live.ts` is unchanged.
 - Real key custody for phone hashes. The salt comes from the environment, which
   is a deployment concern the plan puts in separate custody (§6.8).
+- Exporting database edits back to a country pack, so ops changes can be
+  committed to git (§11 wants both).

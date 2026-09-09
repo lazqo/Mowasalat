@@ -1,11 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { cpSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { Admin } from "../src/admin.ts";
 import { createApi } from "../src/http.ts";
-import { Pack } from "../src/pack.ts";
+import { freshDb } from "./helpers/db.ts";
 import type { CountryPolicy } from "../src/service.ts";
 
 const JO: CountryPolicy = { code: "JO", remainingBucketM: 250, kAnonymityMin: 4 };
@@ -16,12 +12,10 @@ async function withApi(
   fn: (base: string, auth: Record<string, string>) => Promise<void>,
   opts: { withAdmin?: boolean } = {},
 ): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), "pack-"));
-  cpSync("countries/jo", dir, { recursive: true });
-
+  const db = await freshDb();
   const enabled = opts.withAdmin !== false;
   const { server } = createApi(JO, {
-    admin: enabled ? new Admin(new Pack(dir), "test-salt") : undefined,
+    admin: enabled ? db.admin : undefined,
     adminToken: enabled ? TOKEN : undefined,
   });
 
@@ -31,7 +25,7 @@ async function withApi(
     await fn(`http://127.0.0.1:${port}`, { authorization: `Bearer ${TOKEN}` });
   } finally {
     await new Promise((r) => server.close(r));
-    rmSync(dir, { recursive: true, force: true });
+    await db.close();
   }
 }
 

@@ -1,6 +1,11 @@
 /**
  * The ops admin: editing lines and corridors, and running the driver roster.
  *
+ * Everything here is durable. A restart must not lose a line, a corridor, a
+ * driver, which lines he runs, or the tier someone vouched him into — a pilot
+ * that forgets any of that is worse than useless. Live movement is deliberately
+ * not its business and stays in memory with a 60-second expiry.
+ *
  * Two things this service is careful about.
  *
  * A corridor is widened, never tightened, on the evidence of real driving
@@ -8,29 +13,19 @@
  * is drawn wrong, so `suggestWidthFromTraces` reports what the drives imply and
  * an operator decides.
  *
- * The driver roster is the one place in the system that holds anything personal,
- * and it is kept strictly apart from the realtime layer: nothing here is ever
- * handed to `Service`, and a driver id must never appear in a live response
- * (§6.4).
+ * The roster is the one place in the system that holds anything personal, and
+ * it is kept strictly apart from the realtime layer: nothing here is ever handed
+ * to `Service`, and a driver id must never appear in a live response (§6.4).
  */
 import { createHash, randomUUID } from "node:crypto";
 import { corridorFromTraces, suggestCorridorWidthM } from "../../../packages/corridor/src/trace.ts";
+import { validateRoute, type Problem } from "../../../packages/corridor/src/validate.ts";
 import type { LatLng, Route, WaitPoint, Zone } from "../../../packages/corridor/src/types.ts";
-import { InvalidRoute, Pack } from "./pack.ts";
+import { NetworkStore } from "./db/network.ts";
+import { RosterStore, type DriverRecord, type DriverTier } from "./db/roster.ts";
+import type { Sql } from "./db/sql.ts";
 
-export type DriverTier = 0 | 1 | 2 | 3;
-
-export type Driver = {
-  id: string;
-  /** Never the number itself. Lookup is by hash; display is the masked tail. */
-  phoneHash: string;
-  phoneMasked: string;
-  tier: DriverTier;
-  status: "active" | "blocked";
-  routeIds: string[];
-  vouchedBy?: string;
-  createdAt: number;
-};
+export type { DriverRecord as Driver, DriverTier };
 
 export class NotFound extends Error {
   constructor(what: string) {
@@ -46,6 +41,20 @@ export class AdminError extends Error {
   }
 }
 
+export class InvalidRoute extends Error {
+  problems: Problem[];
+  constructor(problems: Problem[]) {
+    super(`route is invalid: ${problems.map((p) => `${p.field} ${p.message}`).join("; ")}`);
+    this.name = "InvalidRoute";
+    this.problems = problems;
+  }
+}
+
+export type AdminPolicy = {
+  vouchingAuthorities: string[];
+  tier2Thresholds: { trips: number; distinct_days: number };
+};
+
 function hashPhone(phone: string, salt: string): string {
   return createHash("sha256").update(`${salt}:${phone}`).digest("hex");
 }
@@ -56,47 +65,52 @@ function maskPhone(phone: string): string {
 }
 
 export class Admin {
-  private pack: Pack;
-  private drivers = new Map<string, Driver>();
-  private byPhoneHash = new Map<string, string>();
+  private network: NetworkStore;
+  private roster: RosterStore;
   private salt: string;
-  private now: () => number;
+  private policy: AdminPolicy;
 
-  constructor(pack: Pack, salt: string, now: () => number = () => Date.now()) {
+  constructor(sql: Sql, countryCode: string, salt: string, policy: AdminPolicy) {
     if (!salt) throw new Error("a phone salt is required");
-    this.pack = pack;
+    this.network = new NetworkStore(sql, countryCode);
+    this.roster = new RosterStore(sql, countryCode);
     this.salt = salt;
-    this.now = now;
+    this.policy = policy;
   }
 
   // --- lines and corridors -----------------------------------------------
 
-  listRoutes(): Route[] {
-    return this.pack.listRoutes();
+  listRoutes(): Promise<Route[]> {
+    return this.network.listRoutes();
   }
 
-  getRoute(routeId: string): Route {
-    const route = this.pack.getRoute(routeId);
+  async getRoute(routeId: string): Promise<Route> {
+    const route = await this.network.getRoute(routeId);
     if (!route) throw new NotFound(`route ${routeId}`);
     return route;
   }
 
   /** Checks an edit without saving it, so the editor can show problems live. */
-  check(route: Route) {
-    return this.pack.check(route);
+  check(route: Route): Problem[] {
+    return validateRoute(route);
   }
 
-  setReferencePaths(routeId: string, paths: LatLng[][]): Route {
-    const route = this.getRoute(routeId);
-    return this.pack.saveRoute({
-      ...route,
-      corridor: { ...route.corridor, referencePaths: paths },
-    });
+  /** The single door every write goes through. A line that fails is never stored. */
+  private async save(route: Route): Promise<Route> {
+    const problems = validateRoute(route);
+    if (problems.length > 0) throw new InvalidRoute(problems);
+    await this.network.saveRoute(route);
+    return route;
   }
 
-  setWidth(routeId: string, widthM: number): Route {
-    const route = this.getRoute(routeId);
-    return this.pack.saveRoute({ ...route, corridor: { ...route.corridor, widthM } });
+  async setReferencePaths(routeId: string, paths: LatLng[][]): Promise<Route> {
+    const route = await this.getRoute(routeId);
+    return this.save({ ...route, corridor: { ...route.corridor, referencePaths: paths } });
+  }
+
+  async setWidth(routeId: string, widthM: number): Promise<Route> {
+    const route = await this.getRoute(routeId);
+    return this.save({ ...route, corridor: { ...route.corridor, widthM } });
   }
 
   /**
@@ -104,8 +118,8 @@ export class Admin {
    * the whole point of a zone, so it comes from the operator's arrangement
    * rather than from geometry.
    */
-  setZones(routeId: string, zones: Omit<Zone, "seq">[]): Route {
-    const route = this.getRoute(routeId);
+  async setZones(routeId: string, zones: Omit<Zone, "seq">[]): Promise<Route> {
+    const route = await this.getRoute(routeId);
     const renumbered: Zone[] = zones.map((z, i) => ({ ...z, seq: i }));
 
     // Served destinations and wait points point at zones by seq, so they move
@@ -118,7 +132,7 @@ export class Admin {
       return next ?? 0;
     };
 
-    return this.pack.saveRoute({
+    return this.save({
       ...route,
       corridor: { ...route.corridor, zones: renumbered },
       servedDestinations: route.servedDestinations.map((d) => ({ ...d, zoneSeq: remap(d.zoneSeq) })),
@@ -126,34 +140,31 @@ export class Admin {
     });
   }
 
-  addWaitPoint(routeId: string, point: Omit<WaitPoint, "id">): Route {
-    const route = this.getRoute(routeId);
+  async addWaitPoint(routeId: string, point: Omit<WaitPoint, "id">): Promise<Route> {
+    const route = await this.getRoute(routeId);
     const wp: WaitPoint = { ...point, id: `wp-${randomUUID().slice(0, 8)}` };
-    return this.pack.saveRoute({ ...route, waitPoints: [...route.waitPoints, wp] });
+    return this.save({ ...route, waitPoints: [...route.waitPoints, wp] });
   }
 
-  removeWaitPoint(routeId: string, waitPointId: string): Route {
-    const route = this.getRoute(routeId);
-    return this.pack.saveRoute({
-      ...route,
-      waitPoints: route.waitPoints.filter((w) => w.id !== waitPointId),
-    });
+  async removeWaitPoint(routeId: string, waitPointId: string): Promise<Route> {
+    const route = await this.getRoute(routeId);
+    return this.save({ ...route, waitPoints: route.waitPoints.filter((w) => w.id !== waitPointId) });
   }
 
-  addServedDestination(routeId: string, dest: { id: string; nameAr: string; zoneSeq: number }): Route {
-    const route = this.getRoute(routeId);
+  async addServedDestination(
+    routeId: string,
+    dest: { id: string; nameAr: string; zoneSeq: number },
+  ): Promise<Route> {
+    const route = await this.getRoute(routeId);
     if (route.servedDestinations.some((d) => d.id === dest.id)) {
       throw new AdminError(`${dest.id} is already served by this line`);
     }
-    return this.pack.saveRoute({
-      ...route,
-      servedDestinations: [...route.servedDestinations, dest],
-    });
+    return this.save({ ...route, servedDestinations: [...route.servedDestinations, dest] });
   }
 
   /** Builds a corridor from recorded drives and saves it, clearing `provisional`. */
-  importTraces(routeId: string, traces: LatLng[][]): { route: Route; widthM: number } {
-    const route = this.getRoute(routeId);
+  async importTraces(routeId: string, traces: LatLng[][]): Promise<{ route: Route; widthM: number }> {
+    const route = await this.getRoute(routeId);
     const { corridor, width } = corridorFromTraces(traces, {
       originNameAr: route.originNameAr,
       destinationNameAr: route.destinationNameAr,
@@ -162,113 +173,108 @@ export class Admin {
     // Intermediate zones are named by people, not derived from a trace, so any
     // the field team has already recorded survive the import.
     const named = route.corridor.zones.filter((z) => z.kind === "intermediate");
-    const zones: Zone[] = [corridor.zones[0], ...named, corridor.zones[corridor.zones.length - 1]]
-      .map((z, i) => ({ ...z, seq: i }));
+    const zones: Zone[] = [corridor.zones[0], ...named, corridor.zones[corridor.zones.length - 1]].map(
+      (z, i) => ({ ...z, seq: i }),
+    );
 
-    const saved = this.pack.saveRoute({
-      ...route,
-      corridor: { ...corridor, zones },
-      provisional: false,
-    });
+    const saved = await this.save({ ...route, corridor: { ...corridor, zones }, provisional: false });
     return { route: saved, widthM: width.widthM };
   }
 
   /**
    * What the observed drives imply the width should be. Reports rather than
-   * applies: widening a corridor is an operator's decision, informed by the
-   * corridor-fit counters.
+   * applies: widening a corridor is an operator's decision.
    */
-  suggestWidthFromTraces(routeId: string, traces: LatLng[][]) {
-    const route = this.getRoute(routeId);
+  async suggestWidthFromTraces(routeId: string, traces: LatLng[][]) {
+    const route = await this.getRoute(routeId);
     return suggestCorridorWidthM(route.corridor.referencePaths[0], traces);
   }
 
   // --- driver roster -------------------------------------------------------
 
   /** Tier 0: a phone number and nothing else, able to run trips at once (§5.2). */
-  createDriver(phone: string): Driver {
+  async createDriver(phone: string): Promise<DriverRecord> {
     const phoneHash = hashPhone(phone, this.salt);
-    const existing = this.byPhoneHash.get(phoneHash);
-    if (existing) throw new AdminError("a driver with this number already exists");
-
-    const driver: Driver = {
-      id: `drv-${randomUUID().slice(0, 8)}`,
-      phoneHash,
-      phoneMasked: maskPhone(phone),
-      tier: 0,
-      status: "active",
-      routeIds: [],
-      createdAt: this.now(),
-    };
-    this.drivers.set(driver.id, driver);
-    this.byPhoneHash.set(phoneHash, driver.id);
-    return driver;
+    if (await this.roster.findByPhoneHash(phoneHash)) {
+      throw new AdminError("a driver with this number already exists");
+    }
+    return this.roster.create(phoneHash, maskPhone(phone));
   }
 
-  getDriver(driverId: string): Driver {
-    const d = this.drivers.get(driverId);
+  async getDriver(driverId: string): Promise<DriverRecord> {
+    const d = await this.roster.get(driverId);
     if (!d) throw new NotFound(`driver ${driverId}`);
     return d;
   }
 
-  findByPhone(phone: string): Driver | null {
-    const id = this.byPhoneHash.get(hashPhone(phone, this.salt));
-    return id ? this.drivers.get(id) ?? null : null;
+  findByPhone(phone: string): Promise<DriverRecord | null> {
+    return this.roster.findByPhoneHash(hashPhone(phone, this.salt));
   }
 
-  listDrivers(): Driver[] {
-    return [...this.drivers.values()].sort((a, b) => a.createdAt - b.createdAt);
+  listDrivers(): Promise<DriverRecord[]> {
+    return this.roster.list();
   }
 
   /** Attaches a driver to a line he actually runs (§5.4). Ops does this, never the driver. */
-  assignRoute(driverId: string, routeId: string): Driver {
-    const driver = this.getDriver(driverId);
-    this.getRoute(routeId); // throws if the line does not exist
-    if (!driver.routeIds.includes(routeId)) driver.routeIds.push(routeId);
-    return driver;
+  async assignRoute(driverId: string, routeId: string): Promise<DriverRecord> {
+    await this.getDriver(driverId);
+    await this.getRoute(routeId); // throws if the line does not exist
+    await this.roster.assignRoute(driverId, routeId);
+    return this.getDriver(driverId);
   }
 
-  unassignRoute(driverId: string, routeId: string): Driver {
-    const driver = this.getDriver(driverId);
-    driver.routeIds = driver.routeIds.filter((r) => r !== routeId);
-    return driver;
+  async unassignRoute(driverId: string, routeId: string): Promise<DriverRecord> {
+    await this.getDriver(driverId);
+    await this.roster.unassignRoute(driverId, routeId);
+    return this.getDriver(driverId);
   }
 
-  /** Tier 1: someone confirmed him in person. The authority must be one the country pack allows. */
-  vouch(driverId: string, authority: string): Driver {
-    const driver = this.getDriver(driverId);
-    if (!this.pack.config.vouching_authorities.includes(authority)) {
+  /** Tier 1: someone confirmed him in person, and only an authority the pack allows. */
+  async vouch(driverId: string, authority: string): Promise<DriverRecord> {
+    await this.getDriver(driverId);
+    if (!this.policy.vouchingAuthorities.includes(authority)) {
       throw new AdminError(
-        `"${authority}" is not a vouching authority in ${this.pack.config.code}; allowed: ${this.pack.config.vouching_authorities.join(", ")}`,
+        `"${authority}" is not a vouching authority here; allowed: ${this.policy.vouchingAuthorities.join(", ")}`,
       );
     }
-    if (driver.tier < 1) driver.tier = 1;
-    driver.vouchedBy = authority;
-    return driver;
+    await this.roster.raiseTier(driverId, 1, authority);
+    return this.getDriver(driverId);
   }
 
   /** Tier 2, earned automatically by driving the line, not granted by anyone. */
-  recordProvenTrips(driverId: string, trips: number, distinctDays: number): Driver {
-    const driver = this.getDriver(driverId);
-    const t = this.pack.config.tier2_thresholds;
-    if (trips >= t.trips && distinctDays >= t.distinct_days && driver.tier < 2) {
-      driver.tier = 2;
+  async recordProvenTrips(driverId: string, trips: number, distinctDays: number): Promise<DriverRecord> {
+    await this.getDriver(driverId);
+    await this.roster.recordProven(driverId, trips, distinctDays);
+    const t = this.policy.tier2Thresholds;
+    if (trips >= t.trips && distinctDays >= t.distinct_days) {
+      await this.roster.raiseTier(driverId, 2);
     }
-    return driver;
+    return this.getDriver(driverId);
   }
 
-  setStatus(driverId: string, status: "active" | "blocked"): Driver {
-    const driver = this.getDriver(driverId);
-    driver.status = status;
-    return driver;
+  async setStatus(driverId: string, status: "active" | "blocked"): Promise<DriverRecord> {
+    await this.getDriver(driverId);
+    await this.roster.setStatus(driverId, status);
+    return this.getDriver(driverId);
   }
 
   /** What a driver's app may show him: his lines, and nothing about anyone else. */
-  routesForDriver(driverId: string): Route[] {
-    const driver = this.getDriver(driverId);
+  async routesForDriver(driverId: string): Promise<Route[]> {
+    const driver = await this.getDriver(driverId);
     if (driver.status === "blocked") return [];
-    return driver.routeIds.map((id) => this.getRoute(id));
+    const routes: Route[] = [];
+    for (const id of driver.routeIds) {
+      const route = await this.network.getRoute(id);
+      if (route) routes.push(route);
+    }
+    return routes;
+  }
+
+  addVehicle(v: Parameters<RosterStore["addVehicle"]>[0]) {
+    return this.roster.addVehicle(v);
+  }
+
+  vehiclesFor(driverId: string) {
+    return this.roster.vehiclesFor(driverId);
   }
 }
-
-export { InvalidRoute };

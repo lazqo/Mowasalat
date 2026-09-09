@@ -22,7 +22,9 @@ Start with the plan: [docs/PLAN.md](docs/PLAN.md).
 | `countries/jo/` | Jordan country pack: policy, and the five pilot lines ([README](countries/jo/README.md)) |
 | `docs/PLAN.md` | Product and engineering plan |
 
-Still to come: the two Flutter apps, Postgres and Redis, OTP, and the
+Postgres holds the network and the roster; live movement stays in memory with a
+60-second expiry and is expected to be lost on restart, which is tested both
+ways. Still to come: the two Flutter apps, driver OTP, Redis, and the
 self-hosted map stack.
 
 Live updates are pushed over Server-Sent Events: `GET /stream/buses` for
@@ -36,8 +38,9 @@ Node 22.6 or newer. No dependencies and no build step — TypeScript runs direct
 through Node's type stripping.
 
 ```
-npm test                  # 151 tests across the corridor library and the API
+npm test                  # 164 tests across the corridor library and the API
 npm run api               # start the API on :3000
+npm run seed              # load a country pack into Postgres (needs DATABASE_URL)
 ADMIN_TOKEN=… PHONE_SALT=… npm run api   # also serves the ops admin at /admin
 npm run validate:packs    # structural check on the Jordan pack
 npm run trace -- <route.json> <trace.json...>   # build a corridor from GPS traces

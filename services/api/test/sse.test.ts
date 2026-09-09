@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createApi } from "../src/http.ts";
 import type { CountryPolicy } from "../src/service.ts";
+import { freshDb } from "./helpers/db.ts";
 
 const JO: CountryPolicy = { code: "JO", remainingBucketM: 250, kAnonymityMin: 4 };
 const ROUTE = "jo-irbid-malka";
@@ -288,4 +289,56 @@ test("many subscribers on one line are all served and all released", async () =>
     await new Promise((r) => setTimeout(r, 150));
     assert.equal(api.service.hub.subscriberCount(), 0);
   });
+});
+
+test("push still works once a persistent roster is loaded", async () => {
+  // The restart case end to end: the API comes back with the roster read from
+  // the database, and a driver on one of his assigned lines still streams.
+  const db = await freshDb();
+  const api = createApi(JO, {
+    admin: db.admin,
+    adminToken: "test-token-abcdefghijklmnop",
+    streamIntervalMs: 20,
+    heartbeatMs: 50,
+  });
+  await new Promise<void>((r) => api.server.listen(0, r));
+  const base = `http://127.0.0.1:${(api.server.address() as { port: number }).port}`;
+
+  try {
+    const driver = await db.admin.createDriver("+962790000042");
+    await db.admin.assignRoute(driver.id, ROUTE);
+
+    // A fresh Admin over the same database is what a restart leaves.
+    const afterRestart = db.restart();
+    const lines = await afterRestart.routesForDriver(driver.id);
+    assert.equal(lines.length, 1);
+
+    // He picks exactly one of his lines and one direction.
+    const started = await (await post(base, "/trips", { routeId: lines[0].id, dir: 0 })).json();
+    await post(base, "/trips/progress", {
+      tripToken: started.tripToken,
+      routeId: lines[0].id,
+      dir: 0,
+      remainingM: 9_000,
+      zoneSeq: 1,
+      speedKph: 40,
+    });
+
+    const { streamTicket } = await (await post(base, "/buses", {
+      routeId: lines[0].id,
+      dir: 0,
+      remainingM: 5_000,
+      zoneSeq: 0,
+    })).json();
+
+    const stream = await fetch(`${base}/stream/buses?ticket=${streamTicket}`);
+    const [snapshot] = (await readEvents(stream, 1)) as { buses: { remainingM: number }[] }[];
+
+    assert.equal(snapshot.buses.length, 1);
+    assert.equal(snapshot.buses[0].remainingM, 9_000);
+    assert.doesNotMatch(JSON.stringify(snapshot), /drv-/, "no driver identity on the stream");
+  } finally {
+    await new Promise((r) => api.server.close(r));
+    await db.close();
+  }
 });

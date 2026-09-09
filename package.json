@@ -13,6 +13,12 @@
     "test": "node --test packages/corridor/test/*.test.ts services/api/test/*.test.ts",
     "validate:packs": "node packages/corridor/src/validate-pack.ts countries/jo",
     "api": "node services/api/src/http.ts",
-    "trace": "node packages/corridor/src/trace-to-corridor.ts"
+    "trace": "node packages/corridor/src/trace-to-corridor.ts",
+    "seed": "node services/api/src/db/seed.ts countries/jo",
+    "migrate": "node -e \"import('./services/api/src/db/pool.ts').then(async m=>{const p=m.createPool(process.env.DATABASE_URL);const{migrate}=await import('./services/api/src/db/migrate.ts');await migrate(p);await p.end();console.log('migrated')})\""
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "pg": "^8.23.0"
   }
 }

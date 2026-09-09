@@ -17,9 +17,9 @@ import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { Admin, AdminError, NotFound } from "./admin.ts";
+import { Admin, AdminError, InvalidRoute, NotFound } from "./admin.ts";
 import { CoordinateLeak } from "./guard.ts";
-import { InvalidRoute, Pack } from "./pack.ts";
+import { Pack } from "./pack.ts";
 import { Service, type CountryPolicy } from "./service.ts";
 import { coalesce, Tickets, topicFor } from "./stream.ts";
 import {
@@ -64,7 +64,7 @@ function equalTokens(a: string, b: string): boolean {
   return x.length === y.length && timingSafeEqual(x, y);
 }
 
-type Handler = (body: unknown, params: Record<string, string>) => unknown;
+type Handler = (body: unknown, params: Record<string, string>) => unknown | Promise<unknown>;
 type Route = { method: string; pattern: string[]; handler: Handler; admin: boolean };
 
 function compile(spec: string): string[] {
@@ -163,7 +163,7 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
       method: "GET",
       pattern: compile("/admin/routes"),
       admin: true,
-      handler: () => ({ routes: admin!.listRoutes() }),
+      handler: async () => ({ routes: await admin!.listRoutes() }),
     },
     {
       method: "GET",
@@ -175,8 +175,8 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
       method: "POST",
       pattern: compile("/admin/routes/:id/check"),
       admin: true,
-      handler: (body, p) => ({
-        problems: admin!.check({ ...admin!.getRoute(p.id), ...(body as object) }),
+      handler: async (body, p) => ({
+        problems: admin!.check({ ...(await admin!.getRoute(p.id)), ...(body as object) }),
       }),
     },
     {
@@ -225,19 +225,18 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
       method: "POST",
       pattern: compile("/admin/routes/:id/traces"),
       admin: true,
-      handler: (body, p) => {
+      handler: async (body, p) => {
         const { traces, apply } = body as { traces?: unknown; apply?: boolean };
         if (!Array.isArray(traces)) throw new BadRequest("traces must be an array of point arrays");
-        return apply
-          ? admin!.importTraces(p.id, traces as never)
-          : { suggestion: admin!.suggestWidthFromTraces(p.id, traces as never) };
+        if (apply) return admin!.importTraces(p.id, traces as never);
+        return { suggestion: await admin!.suggestWidthFromTraces(p.id, traces as never) };
       },
     },
     {
       method: "GET",
       pattern: compile("/admin/drivers"),
       admin: true,
-      handler: () => ({ drivers: admin!.listDrivers() }),
+      handler: async () => ({ drivers: await admin!.listDrivers() }),
     },
     {
       method: "POST",
@@ -400,7 +399,7 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
 
       try {
         const body = await readJson(req, route.admin ? MAX_ADMIN_BODY_BYTES : MAX_BODY_BYTES);
-        return send(res, 200, route.handler(body, params));
+        return send(res, 200, await route.handler(body, params));
       } catch (err) {
         if (err instanceof CoordinateLeak) {
           // Loud on purpose: a passenger or driver client sending a coordinate
@@ -434,14 +433,28 @@ if (process.argv[1]?.endsWith("http.ts")) {
 
   const adminToken = process.env.ADMIN_TOKEN;
   const phoneSalt = process.env.PHONE_SALT;
-  const admin = adminToken && phoneSalt ? new Admin(pack, phoneSalt) : undefined;
+  const databaseUrl = process.env.DATABASE_URL;
 
-  if (!admin) {
-    console.warn("ops endpoints disabled: set ADMIN_TOKEN and PHONE_SALT to enable them");
+  let admin: Admin | undefined;
+  if (adminToken && phoneSalt && databaseUrl) {
+    const { createPool } = await import("./db/pool.ts");
+    const { migrate } = await import("./db/migrate.ts");
+    const pool = createPool(databaseUrl);
+    await migrate(pool);
+    admin = new Admin(pool, pack.config.code, phoneSalt, {
+      vouchingAuthorities: pack.config.vouching_authorities,
+      tier2Thresholds: pack.config.tier2_thresholds,
+    });
+  } else {
+    console.warn(
+      "ops endpoints disabled: set DATABASE_URL, ADMIN_TOKEN and PHONE_SALT to enable them",
+    );
   }
 
   const port = Number(process.env.PORT ?? 3000);
   createApi(policy, { admin, adminToken, mapTiles: process.env.MAP_TILES }).server.listen(port, () =>
-    console.log(`api listening on :${port} (${pack.config.code}, ${pack.listRoutes().length} lines)`),
+    console.log(
+      `api listening on :${port} (${pack.config.code}${admin ? ", ops enabled" : ""})`,
+    ),
   );
 }
