@@ -24,7 +24,9 @@ import { OtpError } from "./otp/service.ts";
 import { InvalidPhone } from "./phone.ts";
 import { Pack } from "./pack.ts";
 import { Service, type CountryPolicy } from "./service.ts";
-import { coalesce, Tickets, topicFor } from "./stream.ts";
+import { coalesce } from "./live/coalesce.ts";
+import { MemoryTicketStore } from "./live/memory.ts";
+import { topicFor, type TicketStore } from "./live/store.ts";
 import {
   BadRequest,
   parseEndTrip,
@@ -149,6 +151,8 @@ export type ApiOptions = {
   streamIntervalMs?: number;
   /** Keeps idle connections alive through proxies that cut them. */
   heartbeatMs?: number;
+  /** Where stream tickets live. In process by default; Redis behind more than one instance. */
+  tickets?: TicketStore;
 };
 
 export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
@@ -156,7 +160,7 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
   const admin = options.admin;
   const onboarding = options.onboarding;
   const adminToken = options.adminToken;
-  const tickets = new Tickets();
+  const tickets = options.tickets ?? new MemoryTicketStore();
   const streamIntervalMs = options.streamIntervalMs ?? 2_000;
   const heartbeatMs = options.heartbeatMs ?? 20_000;
 
@@ -184,11 +188,11 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
       pattern: compile("/v1/trips/progress"),
       admin: false,
       driver: true,
-      handler: (body) => {
+      handler: async (body) => {
         // The client repeats routeId and dir on every update so a restarted
         // server recovers without holding a session for each bus.
         const b = parseTripProgress(body);
-        service.updateProgress(b.tripToken, b.routeId, b.dir, b.remainingM, b.zoneSeq, b.speedKph);
+        await service.updateProgress(b.tripToken, b.routeId, b.dir, b.remainingM, b.zoneSeq, b.speedKph);
         return { ok: true };
       },
     },
@@ -197,8 +201,8 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
       pattern: compile("/v1/trips/end"),
       admin: false,
       driver: true,
-      handler: (body) => {
-        service.endTrip(parseEndTrip(body).tripToken);
+      handler: async (body) => {
+        await service.endTrip(parseEndTrip(body).tripToken);
         return { ok: true };
       },
     },
@@ -206,13 +210,13 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
       method: "POST",
       pattern: compile("/v1/buses"),
       admin: false,
-      handler: (body) => {
+      handler: async (body) => {
         const b = parseFindBuses(body);
         // The ticket binds a stream to this line and direction, so streaming
         // cannot be used to enumerate the whole network (§6.6).
         return {
-          buses: service.findBuses(b.routeId, b.dir, b.remainingM, b.zoneSeq),
-          streamTicket: tickets.issue(b.routeId, b.dir),
+          buses: await service.findBuses(b.routeId, b.dir, b.remainingM, b.zoneSeq),
+          streamTicket: await tickets.issue(b.routeId, b.dir),
         };
       },
     },
@@ -230,17 +234,17 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
       method: "POST",
       pattern: compile("/v1/requests/cancel"),
       admin: false,
-      handler: (body) => {
+      handler: async (body) => {
         const { pseudonym } = body as { pseudonym?: string };
         if (!pseudonym) throw new BadRequest("pseudonym is required");
-        return { cancelled: service.cancelRequest(pseudonym) };
+        return { cancelled: await service.cancelRequest(pseudonym) };
       },
     },
     {
       method: "POST",
       pattern: compile("/v1/requests/boarded"),
       admin: false,
-      handler: (body) => {
+      handler: async (body) => {
         const { pseudonym, routeId, dir } = body as {
           pseudonym?: string;
           routeId?: string;
@@ -249,7 +253,7 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
         if (!pseudonym || !routeId || (dir !== 0 && dir !== 1)) {
           throw new BadRequest("pseudonym, routeId and dir are required");
         }
-        service.boarded(pseudonym, routeId, dir);
+        await service.boarded(pseudonym, routeId, dir);
         return { ok: true };
       },
     },
@@ -499,12 +503,12 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
    * Opens a Server-Sent Events response that resends a snapshot whenever the
    * line changes, and a comment heartbeat while it does not.
    */
-  function openStream(
+  async function openStream(
     req: IncomingMessage,
     res: ServerResponse,
     topic: string,
-    snapshot: () => unknown,
-  ): void {
+    snapshot: () => Promise<unknown>,
+  ): Promise<void> {
     res.writeHead(200, {
       "content-type": "text/event-stream; charset=utf-8",
       "cache-control": "no-store",
@@ -519,11 +523,18 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
 
     const push = () => {
       if (res.writableEnded) return;
-      res.write(`data: ${JSON.stringify(snapshot())}\n\n`);
+      void snapshot()
+        .then((data) => {
+          if (!res.writableEnded) res.write(`data: ${JSON.stringify(data)}\n\n`);
+        })
+        .catch(() => {
+          // A failed snapshot must not tear the stream down; the next
+          // notification produces a fresh one.
+        });
     };
 
     const trigger = coalesce(push, streamIntervalMs);
-    const unsubscribe = service.hub.subscribe(topic, trigger);
+    const unsubscribe = await service.hub.subscribe(topic, trigger);
     const heartbeat = setInterval(() => {
       if (!res.writableEnded) res.write(": keep-alive\n\n");
     }, heartbeatMs);
@@ -547,7 +558,7 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
     const method = req.method ?? "GET";
 
     if (method === "GET" && path === "/health") {
-      return send(res, 200, { ok: true, ...service.liveCounts() });
+      return send(res, 200, { ok: true, ...(await service.liveCounts()) });
     }
     if (method === "GET" && path === "/ops/report") {
       return send(res, 200, { cells: service.report() });
@@ -567,28 +578,26 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
     }
 
     if (method === "GET" && path === "/v1/stream/buses") {
-      const ticket = tickets.redeem(url.searchParams.get("ticket") ?? "");
+      const ticket = await tickets.redeem(url.searchParams.get("ticket") ?? "");
       if (!ticket) {
         return send(res, 401, {
           error: "a stream ticket is required; ask which buses are running first",
         });
       }
-      return openStream(req, res, topicFor(ticket.routeId, ticket.dir), () => ({
-        buses: service.busesOn(ticket.routeId, ticket.dir),
+      return openStream(req, res, topicFor(ticket.routeId, ticket.dir), async () => ({
+        buses: await service.busesOn(ticket.routeId, ticket.dir),
       }));
     }
 
     if (method === "GET" && path === "/v1/stream/waiting") {
       const tripToken = url.searchParams.get("tripToken") ?? "";
-      const pins = service.pinsForTrip(tripToken);
-      if (pins === null) return send(res, 401, { error: "unknown or ended trip" });
 
       // A driver's stream is bound to his own trip, so he sees what is ahead of
       // him on his own line and nothing else, at any tier.
-      const mine = service.tripRoute(tripToken);
+      const mine = await service.tripRoute(tripToken);
       if (!mine) return send(res, 401, { error: "unknown or ended trip" });
-      return openStream(req, res, topicFor(mine.routeId, mine.dir), () => ({
-        pins: service.pinsForTrip(tripToken) ?? [],
+      return openStream(req, res, topicFor(mine.routeId, mine.dir), async () => ({
+        pins: (await service.pinsForTrip(tripToken)) ?? [],
       }));
     }
 
@@ -753,8 +762,31 @@ if (process.argv[1]?.endsWith("http.ts")) {
     );
   }
 
+  // Live operational state. In process by default, which is correct for a
+  // single instance; Redis when a pilot runs behind more than one, so a driver
+  // reporting to one server is seen by passengers streaming from another.
+  let live, hub, tickets, redisNote = "in process";
+  if (process.env.REDIS_URL) {
+    const { createClient } = await import("redis");
+    const { assertNoPersistence, RedisHub, RedisLiveStore, RedisTicketStore } = await import(
+      "./live/redis.ts"
+    );
+    const client = createClient({ url: process.env.REDIS_URL });
+    await client.connect();
+
+    // Fails loudly rather than quietly accumulating a movement trail on disk.
+    await assertNoPersistence(client as never);
+
+    live = new RedisLiveStore(client as never);
+    hub = new RedisHub(client as never);
+    tickets = new RedisTicketStore(client as never);
+    redisNote = "redis";
+  }
+
   const port = Number(process.env.PORT ?? 3000);
   createApi(policy, {
+    service: new Service(policy, undefined, undefined, { live, hub }),
+    tickets,
     admin,
     onboarding,
     adminToken,
@@ -769,6 +801,8 @@ if (process.argv[1]?.endsWith("http.ts")) {
       strings: pack.config.strings,
     },
   }).server.listen(port, () =>
-    console.log(`api listening on :${port} (${pack.config.code}${admin ? ", ops enabled" : ""})`),
+    console.log(
+      `api listening on :${port} (${pack.config.code}, live state ${redisNote}${admin ? ", ops enabled" : ""})`,
+    ),
   );
 }

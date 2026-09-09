@@ -59,12 +59,12 @@ test("a driver assigned to several lines still picks exactly one to drive", asyn
     // A trip is one line and one direction, which is a live decision the
     // database plays no part in (§5.4).
     const service = new Service(JO);
-    const started = service.startTrip(offered[0].id, 0);
-    service.updateProgress(started.tripToken, offered[0].id, 0, 8_000, 1, 40);
+    const started = await service.startTrip(offered[0].id, 0);
+    await service.updateProgress(started.tripToken, offered[0].id, 0, 8_000, 1, 40);
 
-    assert.equal(service.busesOn(offered[0].id, 0).length, 1);
-    assert.equal(service.busesOn(offered[1].id, 0).length, 0, "the other line carries no trip");
-    assert.equal(service.busesOn(offered[0].id, 1).length, 0, "nor the other direction");
+    assert.equal((await service.busesOn(offered[0].id, 0)).length, 1);
+    assert.equal((await service.busesOn(offered[1].id, 0)).length, 0, "the other line carries no trip");
+    assert.equal((await service.busesOn(offered[0].id, 1)).length, 0, "nor the other direction");
   });
 });
 
@@ -167,19 +167,19 @@ test("live bus positions do NOT survive a restart", async () => {
     await db.admin.assignRoute(driver.id, ROUTE);
 
     const before = new Service(JO);
-    const started = before.startTrip(ROUTE, 0);
-    before.updateProgress(started.tripToken, ROUTE, 0, 8_000, 2, 40);
-    assert.equal(before.busesOn(ROUTE, 0).length, 1);
+    const started = await before.startTrip(ROUTE, 0);
+    await before.updateProgress(started.tripToken, ROUTE, 0, 8_000, 2, 40);
+    assert.equal((await before.busesOn(ROUTE, 0)).length, 1);
 
     // The process comes back: durable state is reloaded, live state starts empty.
     const afterRestart = db.restart();
     const after = new Service(JO);
 
-    assert.equal(after.busesOn(ROUTE, 0).length, 0, "no bus was resurrected");
-    assert.equal(after.liveCounts().trips, 0);
-    assert.equal(after.liveCounts().requests, 0);
-    assert.deepEqual(after.findBuses(ROUTE, 0, 5_000, 1), []);
-    assert.equal(after.pinsForTrip(started.tripToken), null, "the old trip token is worthless");
+    assert.equal((await after.busesOn(ROUTE, 0)).length, 0, "no bus was resurrected");
+    assert.equal((await after.liveCounts()).trips, 0);
+    assert.equal((await after.liveCounts()).requests, 0);
+    assert.deepEqual(await after.findBuses(ROUTE, 0, 5_000, 1), []);
+    assert.equal(await after.pinsForTrip(started.tripToken), null, "the old trip token is worthless");
 
     // But the roster it belonged to is intact.
     assert.deepEqual((await afterRestart.getDriver(driver.id)).routeIds, [ROUTE]);
@@ -189,11 +189,11 @@ test("live bus positions do NOT survive a restart", async () => {
 test("waiting ride requests do not survive a restart either", async () => {
   await withDb(async () => {
     const before = new Service(JO);
-    before.createRequest(ROUTE, 0, "jo-malka", 5_000, 1);
-    assert.equal(before.liveCounts().requests, 1);
+    await before.createRequest(ROUTE, 0, "jo-malka", 5_000, 1);
+    assert.equal((await before.liveCounts()).requests, 1);
 
     const after = new Service(JO);
-    assert.equal(after.liveCounts().requests, 0);
+    assert.equal((await after.liveCounts()).requests, 0);
   });
 });
 

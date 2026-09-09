@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
-    "pg": "^8.23.0"
+    "pg": "^8.23.0",
+    "redis": "^6.2.1"
   }
 }

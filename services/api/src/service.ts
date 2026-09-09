@@ -9,8 +9,8 @@ import { randomUUID } from "node:crypto";
 import { rankCandidates, type LiveTrip as MatchTrip, type PassengerFix } from "../../../packages/corridor/src/matching.ts";
 import { Counters, hourBucket } from "./counters.ts";
 import { createLogger } from "./guard.ts";
-import { LiveState, type Clock } from "./live.ts";
-import { Hub, topicFor } from "./stream.ts";
+import { MemoryHub, MemoryLiveStore } from "./live/memory.ts";
+import { topicFor, type Clock, type Hub, type LiveStore } from "./live/store.ts";
 import { assertBucketed, BadRequest, type Direction } from "./wire.ts";
 
 export type CountryPolicy = {
@@ -43,20 +43,27 @@ export type BusPosition = {
 };
 
 export class Service {
-  private live: LiveState;
+  private live: LiveStore;
   private counters: Counters;
   private policy: CountryPolicy;
   private now: Clock;
   private log: ReturnType<typeof createLogger>;
   readonly hub: Hub;
 
-  constructor(policy: CountryPolicy, now: Clock = () => Date.now(), sink?: (l: string) => void) {
+  constructor(
+    policy: CountryPolicy,
+    now: Clock = () => Date.now(),
+    sink?: (l: string) => void,
+    stores: { live?: LiveStore; hub?: Hub } = {},
+  ) {
     this.policy = policy;
     this.now = now;
-    this.live = new LiveState(now);
+    // In process by default, which is right for one instance; Redis is passed
+    // in when a pilot runs behind more than one.
+    this.live = stores.live ?? new MemoryLiveStore(now);
+    this.hub = stores.hub ?? new MemoryHub();
     this.counters = new Counters();
     this.log = createLogger(sink);
-    this.hub = new Hub();
   }
 
   // --- driver ------------------------------------------------------------
@@ -66,10 +73,10 @@ export class Service {
    * public pseudonym that rotates with every trip, so a bus cannot be followed
    * from one day to the next (§6.4).
    */
-  startTrip(routeId: string, dir: Direction): { tripToken: string; pseudonym: string } {
+  async startTrip(routeId: string, dir: Direction): Promise<{ tripToken: string; pseudonym: string }> {
     const tripToken = randomUUID();
     const pseudonym = randomUUID().slice(0, 8);
-    this.live.startTrip(tripToken, pseudonym);
+    await this.live.startTrip(tripToken, pseudonym);
     this.counters.increment("line_health", {
       routeId,
       dir,
@@ -80,19 +87,25 @@ export class Service {
     return { tripToken, pseudonym };
   }
 
-  updateProgress(
+  async updateProgress(
     tripToken: string,
     routeId: string,
     dir: Direction,
     remainingM: number,
     zoneSeq: number,
     speedKph: number,
-  ): void {
+  ): Promise<void> {
     assertBucketed(remainingM, this.policy.remainingBucketM);
-    const updated = this.live.updateTrip(tripToken, { routeId, dir, remainingM, zoneSeq, speedKph });
+    const updated = await this.live.updateTrip(tripToken, {
+      routeId,
+      dir,
+      remainingM,
+      zoneSeq,
+      speedKph,
+    });
     if (!updated) throw new BadRequest("unknown or ended trip");
     this.counters.increment("demand", { routeId, dir, zoneSeq, hourBucket: hourBucket(this.now()) }, 0);
-    this.hub.publish(topicFor(routeId, dir));
+    await this.hub.publish(topicFor(routeId, dir));
   }
 
   /**
@@ -109,11 +122,11 @@ export class Service {
     });
   }
 
-  endTrip(tripToken: string, routeId?: string, dir?: Direction): void {
-    const ending = this.live.pseudonymFor(tripToken);
-    const wasOn = ending ? this.live.tripByPseudonym(ending) : undefined;
-    if (!this.live.endTrip(tripToken)) throw new BadRequest("unknown or ended trip");
-    if (wasOn) this.hub.publish(topicFor(wasOn.routeId, wasOn.dir));
+  async endTrip(tripToken: string, routeId?: string, dir?: Direction): Promise<void> {
+    const ending = await this.live.pseudonymFor(tripToken);
+    const wasOn = ending ? await this.live.tripByPseudonym(ending) : undefined;
+    if (!(await this.live.endTrip(tripToken))) throw new BadRequest("unknown or ended trip");
+    if (wasOn) await this.hub.publish(topicFor(wasOn.routeId, wasOn.dir));
     if (routeId !== undefined && dir !== undefined) {
       this.counters.increment("line_health", {
         routeId,
@@ -125,22 +138,27 @@ export class Service {
   }
 
   /** What a driver sees: waiting passengers ahead of him, as counts, never identities. */
-  waitingAhead(tripToken: string, windowM = 15_000): WaitingPin[] {
-    const pseudonym = this.live.pseudonymFor(tripToken);
+  async waitingAhead(tripToken: string, windowM = 15_000): Promise<WaitingPin[]> {
+    const pseudonym = await this.live.pseudonymFor(tripToken);
     if (!pseudonym) throw new BadRequest("unknown or ended trip");
 
     // A trip that has not reported progress yet has no position, so there is
     // nothing ahead of it to show.
-    const mine = this.live.tripByPseudonym(pseudonym);
+    const mine = await this.live.tripByPseudonym(pseudonym);
     if (!mine) return [];
 
     return this.pinsFor(mine.routeId, mine.dir, mine.remainingM, windowM);
   }
 
-  pinsFor(routeId: string, dir: Direction, driverRemainingM: number, windowM: number): WaitingPin[] {
-    const ahead = this.live
-      .requestsOn(routeId, dir)
-      .filter((r) => r.remainingM < driverRemainingM && driverRemainingM - r.remainingM <= windowM);
+  async pinsFor(
+    routeId: string,
+    dir: Direction,
+    driverRemainingM: number,
+    windowM: number,
+  ): Promise<WaitingPin[]> {
+    const ahead = (await this.live.requestsOn(routeId, dir)).filter(
+      (r) => r.remainingM < driverRemainingM && driverRemainingM - r.remainingM <= windowM,
+    );
 
     const byCell = new Map<string, WaitingPin>();
     for (const r of ahead) {
@@ -155,11 +173,16 @@ export class Service {
   // --- passenger ---------------------------------------------------------
 
   /** Buses that will pass this passenger, soonest first. */
-  findBuses(routeId: string, dir: Direction, remainingM: number, zoneSeq: number): BusSighting[] {
+  async findBuses(
+    routeId: string,
+    dir: Direction,
+    remainingM: number,
+    zoneSeq: number,
+  ): Promise<BusSighting[]> {
     assertBucketed(remainingM, this.policy.remainingBucketM);
 
     const pax: PassengerFix = { routeId, dir, remainingM, zoneSeq };
-    const trips: MatchTrip[] = this.live.tripsOn(routeId, dir).map((t) => ({
+    const trips: MatchTrip[] = (await this.live.tripsOn(routeId, dir)).map((t) => ({
       pseudonym: t.pseudonym,
       routeId: t.routeId,
       dir: t.dir,
@@ -195,9 +218,8 @@ export class Service {
    * passenger never has to send one: her phone already holds the corridor, so
    * it computes the gap and the ETA itself from these scalars.
    */
-  busesOn(routeId: string, dir: Direction): BusPosition[] {
-    return this.live
-      .tripsOn(routeId, dir)
+  async busesOn(routeId: string, dir: Direction): Promise<BusPosition[]> {
+    return (await this.live.tripsOn(routeId, dir))
       .map((t) => ({
         pseudonym: t.pseudonym,
         remainingM: t.remainingM,
@@ -208,18 +230,18 @@ export class Service {
   }
 
   /** Which line and direction a trip token is currently running, if any. */
-  tripRoute(tripToken: string): { routeId: string; dir: Direction } | null {
-    const pseudonym = this.live.pseudonymFor(tripToken);
+  async tripRoute(tripToken: string): Promise<{ routeId: string; dir: Direction } | null> {
+    const pseudonym = await this.live.pseudonymFor(tripToken);
     if (!pseudonym) return null;
-    const mine = this.live.tripByPseudonym(pseudonym);
+    const mine = await this.live.tripByPseudonym(pseudonym);
     return mine ? { routeId: mine.routeId, dir: mine.dir } : null;
   }
 
   /** The pins for a driver's own active trip, for a stream subscriber. */
-  pinsForTrip(tripToken: string, windowM = 15_000): WaitingPin[] | null {
-    const pseudonym = this.live.pseudonymFor(tripToken);
+  async pinsForTrip(tripToken: string, windowM = 15_000): Promise<WaitingPin[] | null> {
+    const pseudonym = await this.live.pseudonymFor(tripToken);
     if (!pseudonym) return null;
-    const mine = this.live.tripByPseudonym(pseudonym);
+    const mine = await this.live.tripByPseudonym(pseudonym);
     if (!mine) return [];
     return this.pinsFor(mine.routeId, mine.dir, mine.remainingM, windowM);
   }
@@ -233,30 +255,30 @@ export class Service {
     });
   }
 
-  createRequest(
+  async createRequest(
     routeId: string,
     dir: Direction,
     destinationId: string,
     remainingM: number,
     zoneSeq: number,
-  ): { pseudonym: string } {
+  ): Promise<{ pseudonym: string }> {
     assertBucketed(remainingM, this.policy.remainingBucketM);
     // A fresh pseudonym per request, not per device: two requests by the same
     // person on consecutive days are not linkable here (§6.4).
     const pseudonym = randomUUID().slice(0, 8);
-    this.live.addRequest({ pseudonym, routeId, dir, destinationId, remainingM, zoneSeq });
+    await this.live.addRequest({ pseudonym, routeId, dir, destinationId, remainingM, zoneSeq });
     this.counters.increment("demand", { routeId, dir, zoneSeq, hourBucket: hourBucket(this.now()) });
-    this.hub.publish(topicFor(routeId, dir));
+    await this.hub.publish(topicFor(routeId, dir));
     return { pseudonym };
   }
 
-  cancelRequest(pseudonym: string): boolean {
+  cancelRequest(pseudonym: string): Promise<boolean> {
     return this.live.cancelRequest(pseudonym);
   }
 
-  boarded(pseudonym: string, routeId: string, dir: Direction): void {
-    this.live.cancelRequest(pseudonym);
-    this.hub.publish(topicFor(routeId, dir));
+  async boarded(pseudonym: string, routeId: string, dir: Direction): Promise<void> {
+    await this.live.cancelRequest(pseudonym);
+    await this.hub.publish(topicFor(routeId, dir));
     this.counters.increment("match_quality", {
       routeId,
       dir,
@@ -272,7 +294,7 @@ export class Service {
     return this.counters.report(this.policy.kAnonymityMin);
   }
 
-  liveCounts(): { trips: number; requests: number } {
+  liveCounts(): Promise<{ trips: number; requests: number }> {
     return this.live.counts();
   }
 }

@@ -47,7 +47,6 @@ guard sits on the endpoints where a person could be located.
 |---|---|
 | `wire.ts` | The wire contract and its validation |
 | `guard.ts` | Coordinate detection and the safe logger |
-| `live.ts` | Expiring in-memory state — the Redis stand-in, same contract |
 | `counters.ts` | Aggregates, with personal dimensions refused and thin cells suppressed |
 | `service.ts` | The domain layer. No HTTP in sight |
 | `db/schema.sql` | The durable half: network and roster. No trip or position table, deliberately |
@@ -58,7 +57,10 @@ guard sits on the endpoints where a person could be located.
 | `otp/provider.ts` | How a code reaches him: development, SMS, or a person |
 | `otp/service.ts` | Issuing and checking codes, with the rate limits |
 | `onboarding.ts` | Sign-up, driver tokens, and ops invitations |
-| `stream.ts` | The push hub, coalescing, and stream tickets |
+| `live/store.ts` | The contract for live state, hub and tickets |
+| `live/memory.ts` | In process: correct for one instance |
+| `live/redis.ts` | Redis: for a pilot behind more than one |
+| `live/coalesce.ts` | At most one push per interval |
 | `pack.ts` | Reading and writing country packs, validated and atomic |
 | `admin.ts` | Ops: line and corridor editing, and the driver roster |
 | `editor.html` | The corridor editor served at `/admin` |
@@ -210,12 +212,40 @@ Ops can create an **invitation** during face-to-face onboarding: a short code,
 read aloud, that puts a driver straight onto the right lines already vouched to
 tier 1. Single use, expiring, and stored hashed.
 
+## Live state: Redis or in process
+
+Postgres is durable configuration and roster. Redis is ephemeral operational
+state, and the two never mix: no trip, request or position is ever written to
+Postgres because Redis was inconvenient.
+
+Set `REDIS_URL` and trip progress, ride requests, pub/sub, the trip pseudonym
+mapping and stream tickets all move to Redis; leave it unset and they stay in
+process, which is correct for a single instance. `live-store.test.ts` runs **one
+behavioural suite against both**, so they are proven to agree rather than assumed
+to — and it announces the Redis half as skipped rather than passing silently
+when `REDIS_URL` is absent.
+
+Two things the Redis implementation is careful about:
+
+**Nothing may be durable.** Every key carries a TTL, checked by a test that
+enumerates the keyspace, and `assertNoPersistence` refuses to start against a
+Redis writing to disk. An RDB snapshot of this keyspace would be exactly the
+movement trail the plan promises never to keep, so it is a guard rail rather
+than a preference.
+
+**Membership expires with its member.** A plain set of pseudonyms per line would
+keep buses that stopped reporting an hour ago, because a set cannot expire
+individual members. Membership is a sorted set scored by expiry, pruned on read,
+and the index key expires too.
+
+Verified against real Redis with two instances: a code issued on one and
+verified on the other, a driver reporting to one while a passenger streams the
+same bus from the other.
+
 ## Not built yet
 
 - The SSE endpoints for the passenger and driver streams.
 - Postgres. `live.ts` is in-memory; Redis replaces it behind the same contract.
-- Redis. Live state is in-process, which is correct at pilot scale but means a
-  second instance would not share it. The contract in `live.ts` is unchanged.
 - Real key custody for phone hashes. The salt comes from the environment, which
   is a deployment concern the plan puts in separate custody (§6.8).
 - Exporting database edits back to a country pack, so ops changes can be
