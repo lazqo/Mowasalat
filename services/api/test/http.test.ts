@@ -1,45 +1,45 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createApi } from "../src/http.ts";
-import type { CountryPolicy } from "../src/service.ts";
+import { freshApi } from "./helpers/db.ts";
 
-const JO: CountryPolicy = { code: "JO", remainingBucketM: 250, kAnonymityMin: 4 };
 const ROUTE = "jo-irbid-malka";
 
-async function withApi<T>(fn: (base: string) => Promise<T>): Promise<T> {
-  const { server } = createApi(JO);
-  await new Promise<void>((r) => server.listen(0, r));
-  const port = (server.address() as { port: number }).port;
+async function withApi(
+  fn: (base: string, api: Awaited<ReturnType<typeof freshApi>>) => Promise<void>,
+): Promise<void> {
+  const api = await freshApi();
   try {
-    return await fn(`http://127.0.0.1:${port}`);
+    await fn(api.base, api);
   } finally {
-    await new Promise((r) => server.close(r));
+    await api.close();
   }
 }
 
-const post = (base: string, path: string, body: unknown) =>
+const post = (base: string, path: string, body: unknown, token?: string) =>
   fetch(`${base}${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify(body),
   });
 
 test("a driver starts a trip, reports progress, and a passenger sees him", async () => {
-  await withApi(async (base) => {
-    const started = await (await post(base, "/trips", { routeId: ROUTE, dir: 0 })).json();
+  await withApi(async (base, api) => {
+    const { driverToken } = await api.driverOn(ROUTE);
+    const started = await (await post(base, "/v1/trips", { routeId: ROUTE, dir: 0 }, driverToken)).json();
     assert.ok(started.tripToken && started.pseudonym);
 
-    const progress = await post(base, "/trips/progress", {
-      tripToken: started.tripToken,
-      routeId: ROUTE,
-      dir: 0,
-      remainingM: 8_000,
-      zoneSeq: 2,
-      speedKph: 40,
-    });
+    const progress = await post(
+      base,
+      "/v1/trips/progress",
+      { tripToken: started.tripToken, routeId: ROUTE, dir: 0, remainingM: 8_000, zoneSeq: 2, speedKph: 40 },
+      driverToken,
+    );
     assert.equal(progress.status, 200, await progress.clone().text());
 
-    const found = await (await post(base, "/buses", {
+    const found = await (await post(base, "/v1/buses", {
       routeId: ROUTE,
       dir: 0,
       remainingM: 5_000,
@@ -53,9 +53,10 @@ test("a driver starts a trip, reports progress, and a passenger sees him", async
 });
 
 test("nothing a bus sighting returns can locate anyone", async () => {
-  await withApi(async (base) => {
-    const started = await (await post(base, "/trips", { routeId: ROUTE, dir: 0 })).json();
-    await post(base, "/trips/progress", {
+  await withApi(async (base, api) => {
+    const { driverToken } = await api.driverOn(ROUTE);
+    const started = await (await post(base, "/v1/trips", { routeId: ROUTE, dir: 0 }, driverToken)).json();
+    await post(base, "/v1/trips/progress", {
       tripToken: started.tripToken,
       routeId: ROUTE,
       dir: 0,
@@ -63,7 +64,7 @@ test("nothing a bus sighting returns can locate anyone", async () => {
       zoneSeq: 2,
       speedKph: 40,
     });
-    const body = await (await post(base, "/buses", {
+    const body = await (await post(base, "/v1/buses", {
       routeId: ROUTE,
       dir: 0,
       remainingM: 5_000,
@@ -76,8 +77,9 @@ test("nothing a bus sighting returns can locate anyone", async () => {
 });
 
 test("a coordinate on the wire is refused with a named field", async () => {
-  await withApi(async (base) => {
-    const res = await post(base, "/trips", { routeId: ROUTE, dir: 0, lat: 32.5556, lng: 35.8497 });
+  await withApi(async (base, api) => {
+    const { driverToken } = await api.driverOn(ROUTE);
+    const res = await post(base, "/v1/trips", { routeId: ROUTE, dir: 0, lat: 32.5556, lng: 35.8497 }, driverToken);
     assert.equal(res.status, 400);
     const body = await res.json();
     assert.match(body.error, /coordinates are never accepted/);
@@ -87,27 +89,43 @@ test("a coordinate on the wire is refused with a named field", async () => {
 
 test("a position finer than policy is refused on the wire", async () => {
   await withApi(async (base) => {
-    const res = await post(base, "/buses", { routeId: ROUTE, dir: 0, remainingM: 5_123, zoneSeq: 1 });
+    const res = await post(base, "/v1/buses", { routeId: ROUTE, dir: 0, remainingM: 5_123, zoneSeq: 1 });
     assert.equal(res.status, 400);
     assert.match((await res.json()).error, /more precise than policy/);
   });
 });
 
 test("malformed and oversized bodies are refused, not crashed on", async () => {
-  await withApi(async (base) => {
-    const bad = await fetch(`${base}/trips`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{not json",
-    });
+  await withApi(async (base, api) => {
+    const { driverToken } = await api.driverOn(ROUTE);
+    const auth = { "content-type": "application/json", authorization: `Bearer ${driverToken}` };
+
+    const bad = await fetch(`${base}/v1/trips`, { method: "POST", headers: auth, body: "{not json" });
     assert.equal(bad.status, 400);
 
-    const huge = await fetch(`${base}/trips`, {
+    const huge = await fetch(`${base}/v1/trips`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: auth,
       body: JSON.stringify({ routeId: "x".repeat(20_000), dir: 0 }),
     });
     assert.equal(huge.status, 400);
+  });
+});
+
+test("a trip cannot be started without signing in, or on someone else's line", async () => {
+  await withApi(async (base, api) => {
+    // Assigned lines are not just a convenience: they are what a driver may run.
+    assert.equal((await post(base, "/v1/trips", { routeId: ROUTE, dir: 0 })).status, 401);
+
+    const { driverToken } = await api.driverOn(ROUTE);
+    const wrongLine = await post(
+      base,
+      "/v1/trips",
+      { routeId: "jo-irbid-umm-qais", dir: 0 },
+      driverToken,
+    );
+    assert.equal(wrongLine.status, 400);
+    assert.match((await wrongLine.json()).error, /not assigned/);
   });
 });
 

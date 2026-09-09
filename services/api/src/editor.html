@@ -173,7 +173,7 @@ function draw() {
 
 async function saveZones(zones) {
   try {
-    route = await api("/admin/routes/" + route.id + "/zones", "POST", { zones });
+    route = await api("/v1/admin/routes/" + route.id + "/zones", "POST", { zones });
     renderMeta(); renderZones(); draw();
     showProblems([], "Saved.");
   } catch (err) {
@@ -182,7 +182,7 @@ async function saveZones(zones) {
 }
 
 async function loadRoute(id) {
-  route = await api("/admin/routes/" + id);
+  route = await api("/v1/admin/routes/" + id);
   el("width").value = route.corridor.widthM;
   renderMeta(); renderZones(); draw();
   showProblems([]);
@@ -190,7 +190,7 @@ async function loadRoute(id) {
 
 el("saveWidth").onclick = async () => {
   try {
-    route = await api("/admin/routes/" + route.id + "/width", "POST", { widthM: Number(el("width").value) });
+    route = await api("/v1/admin/routes/" + route.id + "/width", "POST", { widthM: Number(el("width").value) });
     draw();
     showProblems([], "Width saved.");
   } catch (err) {
@@ -221,7 +221,7 @@ async function readTraces() {
 
 el("suggest").onclick = async () => {
   try {
-    const { suggestion } = await api("/admin/routes/" + route.id + "/traces", "POST", { traces: await readTraces() });
+    const { suggestion } = await api("/v1/admin/routes/" + route.id + "/traces", "POST", { traces: await readTraces() });
     showProblems([], "Those drives suggest " + suggestion.widthM + " m (95th percentile offset " +
       Math.round(suggestion.percentileM) + " m, furthest " + Math.round(suggestion.maxOffsetM) + " m).");
     el("width").value = suggestion.widthM;
@@ -232,7 +232,7 @@ el("suggest").onclick = async () => {
 
 el("apply").onclick = async () => {
   try {
-    const result = await api("/admin/routes/" + route.id + "/traces", "POST", { traces: await readTraces(), apply: true });
+    const result = await api("/v1/admin/routes/" + route.id + "/traces", "POST", { traces: await readTraces(), apply: true });
     route = result.route;
     el("width").value = route.corridor.widthM;
     renderMeta(); renderZones(); draw();
@@ -260,12 +260,12 @@ map.on("load", async () => {
     paint: { "text-color": "#15202B", "text-halo-color": "#fff", "text-halo-width": 2 } });
 
   try {
-    const { routes } = await api("/admin/routes");
+    const { routes } = await api("/v1/admin/routes");
     el("route").innerHTML = routes.map((r) => '<option value="' + r.id + '">' + r.nameAr + "</option>").join("");
     el("route").onchange = (e) => loadRoute(e.target.value);
     if (routes.length) await loadRoute(routes[0].id);
   } catch (err) {
-    showProblems([{ field: "auth", message: err.message + " — open /admin?token=YOUR_ADMIN_TOKEN" }]);
+    showProblems([{ field: "auth", message: err.message + " — open /v1/admin?token=YOUR_ADMIN_TOKEN" }]);
   }
 });
 </script>

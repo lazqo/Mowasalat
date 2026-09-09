@@ -150,3 +150,65 @@ create table if not exists driver_route (
 create index if not exists route_country_idx on route (country_code) where active;
 create index if not exists driver_route_route_idx on driver_route (route_id);
 create index if not exists destination_country_idx on destination (country_code);
+
+-- ---------------------------------------------------------------------------
+-- Driver authentication.
+--
+-- Still no movement here. A phone number is never stored, only a salted hash
+-- and a masked tail; an OTP code is never stored, only an HMAC of it. Neither a
+-- phone number nor a driver id may ever reach the realtime layer (§6.4), which
+-- is why a trip carries its own short-lived token instead.
+
+create table if not exists otp_challenge (
+  id            text primary key,
+  phone_hash    text not null,
+  -- HMAC of the code under a server secret, so database access alone is not
+  -- enough to brute-force a six-digit code.
+  code_hmac     text not null,
+  channel       text not null,
+  attempts      int  not null default 0,
+  max_attempts  int  not null default 5,
+  created_at    timestamptz not null default now(),
+  expires_at    timestamptz not null,
+  consumed_at   timestamptz
+);
+
+create index if not exists otp_challenge_phone_idx on otp_challenge (phone_hash, created_at desc);
+
+-- Send attempts, kept only long enough to rate-limit. Both the phone and the
+-- caller's address are hashed.
+create table if not exists otp_send_log (
+  id          bigserial primary key,
+  phone_hash  text not null,
+  ip_hash     text,
+  sent_at     timestamptz not null default now()
+);
+
+create index if not exists otp_send_log_phone_idx on otp_send_log (phone_hash, sent_at desc);
+create index if not exists otp_send_log_ip_idx on otp_send_log (ip_hash, sent_at desc);
+
+-- What a driver's app holds after verifying. Long-lived, revocable, and
+-- deliberately separate from the ephemeral trip token the realtime layer uses.
+create table if not exists driver_token (
+  token_hmac    text primary key,
+  driver_id     text not null references driver(id) on delete cascade,
+  created_at    timestamptz not null default now(),
+  last_seen_at  timestamptz,
+  revoked_at    timestamptz
+);
+
+create index if not exists driver_token_driver_idx on driver_token (driver_id);
+
+-- Ops creates one of these during face-to-face onboarding so a driver lands
+-- directly on the right lines, already vouched (§5.2 tier 1).
+create table if not exists invitation (
+  code_hmac    text primary key,
+  country_code text not null references country(code) on delete cascade,
+  route_ids    text[] not null default '{}',
+  authority    text not null,
+  note         text,
+  created_at   timestamptz not null default now(),
+  expires_at   timestamptz not null,
+  used_at      timestamptz,
+  used_by      text references driver(id) on delete set null
+);

@@ -13,12 +13,15 @@
  * corridor is public infrastructure and not anybody's location. The rule was
  * always about people, and the split is deliberate rather than an oversight.
  */
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Admin, AdminError, InvalidRoute, NotFound } from "./admin.ts";
-import { CoordinateLeak } from "./guard.ts";
+import { CoordinateLeak, SecretLeak } from "./guard.ts";
+import { Onboarding, Unauthorized } from "./onboarding.ts";
+import { OtpError } from "./otp/service.ts";
+import { InvalidPhone } from "./phone.ts";
 import { Pack } from "./pack.ts";
 import { Service, type CountryPolicy } from "./service.ts";
 import { coalesce, Tickets, topicFor } from "./stream.ts";
@@ -32,6 +35,16 @@ import {
 } from "./wire.ts";
 
 const MAX_BODY_BYTES = 8 * 1024;
+
+/**
+ * The caller's address, hashed, only ever used to rate-limit code requests. The
+ * address itself is not kept.
+ */
+function hashIp(req: IncomingMessage): string | undefined {
+  const raw = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ?? req.socket.remoteAddress;
+  if (!raw) return undefined;
+  return createHash("sha256").update(raw).digest("hex");
+}
 const MAX_ADMIN_BODY_BYTES = 4 * 1024 * 1024; // traces are large
 
 async function readJson(req: IncomingMessage, limit = MAX_BODY_BYTES): Promise<unknown> {
@@ -58,14 +71,54 @@ function send(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
+/**
+ * What a driver's own app may see about him. Never the phone number, never the
+ * hash, and nothing the realtime layer is given.
+ */
+function publicDriver(d: {
+  id: string;
+  phoneMasked: string;
+  tier: number;
+  status: string;
+  routeIds: string[];
+  vouchedBy?: string;
+}) {
+  return {
+    id: d.id,
+    phoneMasked: d.phoneMasked,
+    tier: d.tier,
+    status: d.status,
+    routeIds: d.routeIds,
+    vouchedBy: d.vouchedBy ?? null,
+  };
+}
+
 function equalTokens(a: string, b: string): boolean {
   const x = Buffer.from(a);
   const y = Buffer.from(b);
   return x.length === y.length && timingSafeEqual(x, y);
 }
 
-type Handler = (body: unknown, params: Record<string, string>) => unknown | Promise<unknown>;
-type Route = { method: string; pattern: string[]; handler: Handler; admin: boolean };
+type Ctx = {
+  /** The signed-in driver, present only on routes marked `driver`. */
+  driverId: string;
+  ipHash?: string;
+};
+
+type Handler = (
+  body: unknown,
+  params: Record<string, string>,
+  ctx: Ctx,
+) => unknown | Promise<unknown>;
+
+type Route = {
+  method: string;
+  pattern: string[];
+  handler: Handler;
+  admin: boolean;
+  /** Requires a driver bearer token from OTP sign-in. */
+  driver?: boolean;
+};
 
 function compile(spec: string): string[] {
   return spec.split("/").filter(Boolean);
@@ -84,6 +137,10 @@ function match(pattern: string[], path: string[]): Record<string, string> | null
 export type ApiOptions = {
   service?: Service;
   admin?: Admin;
+  /** Driver sign-in. Without it the driver endpoints refuse to serve. */
+  onboarding?: Onboarding;
+  /** What a client needs to know about this country, served at /v1/country. */
+  countryInfo?: Record<string, unknown>;
   /** Required for the ops endpoints. Without it they refuse to serve at all. */
   adminToken?: string;
   /** Basemap style for the corridor editor. Replace with the self-hosted stack. */
@@ -97,6 +154,7 @@ export type ApiOptions = {
 export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
   const service = options.service ?? new Service(policy);
   const admin = options.admin;
+  const onboarding = options.onboarding;
   const adminToken = options.adminToken;
   const tickets = new Tickets();
   const streamIntervalMs = options.streamIntervalMs ?? 2_000;
@@ -106,17 +164,26 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
     // --- passenger and driver: no coordinate may cross this boundary ---
     {
       method: "POST",
-      pattern: compile("/trips"),
+      pattern: compile("/v1/trips"),
       admin: false,
-      handler: (body) => {
+      driver: true,
+      handler: async (body, _p, ctx) => {
         const b = parseStartTrip(body);
+        // Assigned lines are not the active line. A driver may hold several;
+        // starting a trip picks exactly one of them, and only one of his own
+        // (docs/PLAN.md §5.4).
+        const assigned = await admin!.routesForDriver(ctx.driverId);
+        if (!assigned.some((r) => r.id === b.routeId)) {
+          throw new BadRequest("you are not assigned to that line");
+        }
         return service.startTrip(b.routeId, b.dir);
       },
     },
     {
       method: "POST",
-      pattern: compile("/trips/progress"),
+      pattern: compile("/v1/trips/progress"),
       admin: false,
+      driver: true,
       handler: (body) => {
         // The client repeats routeId and dir on every update so a restarted
         // server recovers without holding a session for each bus.
@@ -127,8 +194,9 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
     },
     {
       method: "POST",
-      pattern: compile("/trips/end"),
+      pattern: compile("/v1/trips/end"),
       admin: false,
+      driver: true,
       handler: (body) => {
         service.endTrip(parseEndTrip(body).tripToken);
         return { ok: true };
@@ -136,7 +204,7 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
     },
     {
       method: "POST",
-      pattern: compile("/buses"),
+      pattern: compile("/v1/buses"),
       admin: false,
       handler: (body) => {
         const b = parseFindBuses(body);
@@ -150,7 +218,7 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
     },
     {
       method: "POST",
-      pattern: compile("/requests"),
+      pattern: compile("/v1/requests"),
       admin: false,
       handler: (body) => {
         const b = parseRideRequest(body);
@@ -158,22 +226,149 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
       },
     },
 
+    {
+      method: "POST",
+      pattern: compile("/v1/requests/cancel"),
+      admin: false,
+      handler: (body) => {
+        const { pseudonym } = body as { pseudonym?: string };
+        if (!pseudonym) throw new BadRequest("pseudonym is required");
+        return { cancelled: service.cancelRequest(pseudonym) };
+      },
+    },
+    {
+      method: "POST",
+      pattern: compile("/v1/requests/boarded"),
+      admin: false,
+      handler: (body) => {
+        const { pseudonym, routeId, dir } = body as {
+          pseudonym?: string;
+          routeId?: string;
+          dir?: 0 | 1;
+        };
+        if (!pseudonym || !routeId || (dir !== 0 && dir !== 1)) {
+          throw new BadRequest("pseudonym, routeId and dir are required");
+        }
+        service.boarded(pseudonym, routeId, dir);
+        return { ok: true };
+      },
+    },
+
+    // --- driver sign-in: a phone number and a code, nothing else ---
+    {
+      method: "POST",
+      pattern: compile("/v1/auth/otp/request"),
+      admin: false,
+      handler: async (body, _p, ctx) => {
+        const { phone } = body as { phone?: string };
+        if (!phone) throw new BadRequest("phone is required");
+        return onboarding!.requestCode(phone, ctx.ipHash);
+      },
+    },
+    {
+      method: "POST",
+      pattern: compile("/v1/auth/otp/verify"),
+      admin: false,
+      handler: async (body) => {
+        const { challengeId, code, phone } = body as {
+          challengeId?: string;
+          code?: string;
+          phone?: string;
+        };
+        if (!challengeId || !code || !phone) {
+          throw new BadRequest("challengeId, code and phone are required");
+        }
+        const session = await onboarding!.verify(challengeId, code, phone);
+        return {
+          driverToken: session.driverToken,
+          isNew: session.isNew,
+          driver: publicDriver(session.driver),
+        };
+      },
+    },
+    {
+      method: "POST",
+      pattern: compile("/v1/auth/sign-out"),
+      admin: false,
+      driver: true,
+      handler: async (_b, _p, ctx) => {
+        void ctx;
+        return { ok: true };
+      },
+    },
+
+    // --- the driver's own account ---
+    {
+      method: "GET",
+      pattern: compile("/v1/driver/me"),
+      admin: false,
+      driver: true,
+      handler: async (_b, _p, ctx) => ({
+        driver: publicDriver(await admin!.getDriver(ctx.driverId)),
+        routes: await admin!.routesForDriver(ctx.driverId),
+        vehicles: await admin!.vehiclesFor(ctx.driverId),
+      }),
+    },
+    {
+      method: "GET",
+      pattern: compile("/v1/driver/routes"),
+      admin: false,
+      driver: true,
+      handler: async (_b, _p, ctx) => ({ routes: await admin!.routesForDriver(ctx.driverId) }),
+    },
+    {
+      method: "POST",
+      pattern: compile("/v1/driver/vehicle"),
+      admin: false,
+      driver: true,
+      handler: async (body, _p, ctx) => {
+        const { type, colour, plate, showPlate } = body as {
+          type?: string;
+          colour?: string;
+          plate?: string;
+          showPlate?: boolean;
+        };
+        if (type !== "coaster" && type !== "minibus" && type !== "service") {
+          throw new BadRequest('type must be "coaster", "minibus" or "service"');
+        }
+        return admin!.addVehicle({
+          driverId: ctx.driverId,
+          type,
+          colour: colour ?? null,
+          plate: plate ?? null,
+          // A plate is shown only if the driver chooses to (§16, opt-in).
+          showPlate: showPlate === true,
+        });
+      },
+    },
+    {
+      method: "POST",
+      pattern: compile("/v1/driver/invitation"),
+      admin: false,
+      driver: true,
+      handler: async (body, _p, ctx) => {
+        const { code } = body as { code?: string };
+        if (!code) throw new BadRequest("code is required");
+        return { driver: publicDriver(await onboarding!.redeemInvitation(ctx.driverId, code)) };
+      },
+    },
+
     // --- ops: route geometry is public infrastructure, not a person's position ---
     {
       method: "GET",
-      pattern: compile("/admin/routes"),
+      pattern: compile("/v1/admin/routes"),
       admin: true,
       handler: async () => ({ routes: await admin!.listRoutes() }),
     },
     {
       method: "GET",
-      pattern: compile("/admin/routes/:id"),
+      pattern: compile("/v1/admin/routes/:id"),
       admin: true,
       handler: (_b, p) => admin!.getRoute(p.id),
     },
     {
       method: "POST",
-      pattern: compile("/admin/routes/:id/check"),
+      pattern: compile("/v1/admin/routes/:id/check"),
       admin: true,
       handler: async (body, p) => ({
         problems: admin!.check({ ...(await admin!.getRoute(p.id)), ...(body as object) }),
@@ -181,7 +376,7 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
     },
     {
       method: "POST",
-      pattern: compile("/admin/routes/:id/width"),
+      pattern: compile("/v1/admin/routes/:id/width"),
       admin: true,
       handler: (body, p) => {
         const { widthM } = body as { widthM?: number };
@@ -191,7 +386,7 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
     },
     {
       method: "POST",
-      pattern: compile("/admin/routes/:id/paths"),
+      pattern: compile("/v1/admin/routes/:id/paths"),
       admin: true,
       handler: (body, p) => {
         const { referencePaths } = body as { referencePaths?: unknown };
@@ -201,7 +396,7 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
     },
     {
       method: "POST",
-      pattern: compile("/admin/routes/:id/zones"),
+      pattern: compile("/v1/admin/routes/:id/zones"),
       admin: true,
       handler: (body, p) => {
         const { zones } = body as { zones?: unknown };
@@ -211,19 +406,19 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
     },
     {
       method: "POST",
-      pattern: compile("/admin/routes/:id/waitpoints"),
+      pattern: compile("/v1/admin/routes/:id/waitpoints"),
       admin: true,
       handler: (body, p) => admin!.addWaitPoint(p.id, body as never),
     },
     {
       method: "POST",
-      pattern: compile("/admin/routes/:id/destinations"),
+      pattern: compile("/v1/admin/routes/:id/destinations"),
       admin: true,
       handler: (body, p) => admin!.addServedDestination(p.id, body as never),
     },
     {
       method: "POST",
-      pattern: compile("/admin/routes/:id/traces"),
+      pattern: compile("/v1/admin/routes/:id/traces"),
       admin: true,
       handler: async (body, p) => {
         const { traces, apply } = body as { traces?: unknown; apply?: boolean };
@@ -233,14 +428,32 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
       },
     },
     {
+      method: "POST",
+      pattern: compile("/v1/admin/invitations"),
+      admin: true,
+      handler: async (body) => {
+        const { routeIds, authority, note, ttlHours } = body as {
+          routeIds?: string[];
+          authority?: string;
+          note?: string;
+          ttlHours?: number;
+        };
+        if (!Array.isArray(routeIds) || routeIds.length === 0) {
+          throw new BadRequest("routeIds is required");
+        }
+        if (!authority) throw new BadRequest("authority is required");
+        return onboarding!.createInvitation({ routeIds, authority, note, ttlHours });
+      },
+    },
+    {
       method: "GET",
-      pattern: compile("/admin/drivers"),
+      pattern: compile("/v1/admin/drivers"),
       admin: true,
       handler: async () => ({ drivers: await admin!.listDrivers() }),
     },
     {
       method: "POST",
-      pattern: compile("/admin/drivers"),
+      pattern: compile("/v1/admin/drivers"),
       admin: true,
       handler: (body) => {
         const { phone } = body as { phone?: string };
@@ -250,7 +463,7 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
     },
     {
       method: "POST",
-      pattern: compile("/admin/drivers/:id/routes"),
+      pattern: compile("/v1/admin/drivers/:id/routes"),
       admin: true,
       handler: (body, p) => {
         const { routeId, remove } = body as { routeId?: string; remove?: boolean };
@@ -260,7 +473,7 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
     },
     {
       method: "POST",
-      pattern: compile("/admin/drivers/:id/vouch"),
+      pattern: compile("/v1/admin/drivers/:id/vouch"),
       admin: true,
       handler: (body, p) => {
         const { authority } = body as { authority?: string };
@@ -270,7 +483,7 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
     },
     {
       method: "POST",
-      pattern: compile("/admin/drivers/:id/status"),
+      pattern: compile("/v1/admin/drivers/:id/status"),
       admin: true,
       handler: (body, p) => {
         const { status } = body as { status?: string };
@@ -342,7 +555,18 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
 
     // --- push -------------------------------------------------------------
 
-    if (method === "GET" && path === "/stream/buses") {
+    if (method === "GET" && path === "/v1/country") {
+      return send(res, 200, options.countryInfo ?? { code: policy.code });
+    }
+
+    if (method === "GET" && path === "/v1/routes") {
+      // The network a passenger's phone caches so it can do its own corridor
+      // matching offline. Public infrastructure, no identities.
+      if (!admin) return send(res, 503, { error: "the network is not configured" });
+      return send(res, 200, { routes: await admin.listRoutes() });
+    }
+
+    if (method === "GET" && path === "/v1/stream/buses") {
       const ticket = tickets.redeem(url.searchParams.get("ticket") ?? "");
       if (!ticket) {
         return send(res, 401, {
@@ -354,7 +578,7 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
       }));
     }
 
-    if (method === "GET" && path === "/stream/waiting") {
+    if (method === "GET" && path === "/v1/stream/waiting") {
       const tripToken = url.searchParams.get("tripToken") ?? "";
       const pins = service.pinsForTrip(tripToken);
       if (pins === null) return send(res, 401, { error: "unknown or ended trip" });
@@ -368,7 +592,7 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
       }));
     }
 
-    if (method === "GET" && (path === "/admin" || path === "/admin/")) {
+    if (method === "GET" && (path === "/v1/admin" || path === "/v1/admin/")) {
       if (!admin || !adminToken) {
         return send(res, 503, { error: "ops endpoints are not configured" });
       }
@@ -385,6 +609,20 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
       const params = match(route.pattern, segments);
       if (!params) continue;
 
+      const ctx: Ctx = { driverId: "", ipHash: hashIp(req) };
+
+      if (route.driver) {
+        if (!onboarding || !admin) {
+          return send(res, 503, { error: "driver sign-in is not configured" });
+        }
+        try {
+          const bearer = (req.headers.authorization ?? "").replace(/^Bearer /, "");
+          ctx.driverId = (await onboarding.authenticate(bearer)).id;
+        } catch {
+          return send(res, 401, { error: "sign in again" });
+        }
+      }
+
       if (route.admin) {
         // Fails closed: without a configured token the ops endpoints do not
         // serve at all, rather than serving the driver roster to anyone.
@@ -399,13 +637,28 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
 
       try {
         const body = await readJson(req, route.admin ? MAX_ADMIN_BODY_BYTES : MAX_BODY_BYTES);
-        return send(res, 200, await route.handler(body, params));
+        return send(res, 200, await route.handler(body, params, ctx));
       } catch (err) {
         if (err instanceof CoordinateLeak) {
           // Loud on purpose: a passenger or driver client sending a coordinate
           // is a bug to fix at once, not a request to tolerate.
           return send(res, 400, { error: "coordinates are never accepted", field: err.path });
         }
+        if (err instanceof SecretLeak) {
+          return send(res, 400, { error: "secrets are never accepted here", field: err.path });
+        }
+        if (err instanceof OtpError) {
+          const status = err.code === "too_many_sends" || err.code === "too_many_attempts" ? 429 : 400;
+          return send(res, status, {
+            error: err.message,
+            code: err.code,
+            retryAfterSeconds: err.retryAfterSeconds,
+          });
+        }
+        if (err instanceof InvalidPhone) {
+          return send(res, 400, { error: err.message, code: "invalid_phone" });
+        }
+        if (err instanceof Unauthorized) return send(res, 401, { error: err.message });
         if (err instanceof InvalidRoute) {
           return send(res, 422, { error: "route would be invalid", problems: err.problems });
         }
@@ -436,25 +689,86 @@ if (process.argv[1]?.endsWith("http.ts")) {
   const databaseUrl = process.env.DATABASE_URL;
 
   let admin: Admin | undefined;
+  let onboarding: Onboarding | undefined;
+
   if (adminToken && phoneSalt && databaseUrl) {
     const { createPool } = await import("./db/pool.ts");
     const { migrate } = await import("./db/migrate.ts");
+    const { DevelopmentOtpProvider, ManualOtpProvider, selectProvider, SmsOtpProvider } =
+      await import("./otp/provider.ts");
+    const { rulesFor } = await import("./phone.ts");
+
     const pool = createPool(databaseUrl);
     await migrate(pool);
+
     admin = new Admin(pool, pack.config.code, phoneSalt, {
       vouchingAuthorities: pack.config.vouching_authorities,
       tier2Thresholds: pack.config.tier2_thresholds,
     });
+
+    // Which channels exist here is the country's decision, not the code's. In
+    // development the code is handed straight back so nobody needs an SMS bill;
+    // that provider refuses to be constructed in production.
+    const available = [];
+    if (process.env.NODE_ENV !== "production") available.push(new DevelopmentOtpProvider());
+    if (process.env.SMS_GATEWAY_URL) {
+      available.push(
+        new SmsOtpProvider(async ({ to, text }) => {
+          const res = await fetch(process.env.SMS_GATEWAY_URL!, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              ...(process.env.SMS_GATEWAY_TOKEN
+                ? { authorization: `Bearer ${process.env.SMS_GATEWAY_TOKEN}` }
+                : {}),
+            },
+            body: JSON.stringify({ to, text }),
+          });
+          if (!res.ok) throw new Error(`sms gateway returned ${res.status}`);
+        }),
+      );
+    }
+    available.push(new ManualOtpProvider());
+
+    onboarding = new Onboarding({
+      sql: pool,
+      admin,
+      // The pack decides which channels a country may use. Outside production
+      // the development channel is permitted as well, so a local run can read
+      // its own code without an SMS bill; the provider itself refuses to be
+      // constructed in production, so this cannot widen anything there.
+      provider: selectProvider(
+        available,
+        process.env.NODE_ENV === "production"
+          ? (pack.config.otp_channels ?? ["manual_vouch"])
+          : ["development", ...(pack.config.otp_channels ?? [])],
+      ),
+      secret: process.env.OTP_SECRET ?? phoneSalt,
+      rules: rulesFor(pack.config),
+      countryCode: pack.config.code,
+    });
   } else {
     console.warn(
-      "ops endpoints disabled: set DATABASE_URL, ADMIN_TOKEN and PHONE_SALT to enable them",
+      "driver sign-in and ops disabled: set DATABASE_URL, ADMIN_TOKEN and PHONE_SALT",
     );
   }
 
   const port = Number(process.env.PORT ?? 3000);
-  createApi(policy, { admin, adminToken, mapTiles: process.env.MAP_TILES }).server.listen(port, () =>
-    console.log(
-      `api listening on :${port} (${pack.config.code}${admin ? ", ops enabled" : ""})`,
-    ),
+  createApi(policy, {
+    admin,
+    onboarding,
+    adminToken,
+    mapTiles: process.env.MAP_TILES,
+    countryInfo: {
+      code: pack.config.code,
+      locale: pack.config.locale,
+      digits: pack.config.digits,
+      phonePrefix: pack.config.phone_prefix,
+      remainingBucketM: pack.config.remaining_bucket_m,
+      kAnonymityMin: pack.config.k_anonymity_min,
+      strings: pack.config.strings,
+    },
+  }).server.listen(port, () =>
+    console.log(`api listening on :${port} (${pack.config.code}${admin ? ", ops enabled" : ""})`),
   );
 }

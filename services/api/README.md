@@ -8,7 +8,7 @@ logging a coordinate.
 npm run api                                          # public endpoints only
 DATABASE_URL=… ADMIN_TOKEN=… PHONE_SALT=… npm run api   # with the ops admin at /admin
 npm run seed                                         # load a country pack into Postgres
-npm test                                             # 120 API tests
+npm test                                             # 157 API tests
 ```
 
 No dependencies and no build step; TypeScript runs through Node's type
@@ -54,6 +54,10 @@ guard sits on the endpoints where a person could be located.
 | `db/network.ts` | Countries, hubs, destinations, lines and corridors |
 | `db/roster.ts` | Drivers, vehicles, line assignments, verification state |
 | `db/seed.ts` | Country pack into database |
+| `phone.ts` | Turning what a driver types into one canonical number |
+| `otp/provider.ts` | How a code reaches him: development, SMS, or a person |
+| `otp/service.ts` | Issuing and checking codes, with the rate limits |
+| `onboarding.ts` | Sign-up, driver tokens, and ops invitations |
 | `stream.ts` | The push hub, coalescing, and stream tickets |
 | `pack.ts` | Reading and writing country packs, validated and atomic |
 | `admin.ts` | Ops: line and corridor editing, and the driver roster |
@@ -179,11 +183,37 @@ Geometry is JSONB rather than PostGIS. Every spatial computation happens on the
 phone by design, so the server runs no spatial queries and PostGIS would earn
 nothing yet.
 
+## Driver sign-in
+
+Four screens and no paperwork: مرحبا → رقم الهاتف → رمز التحقق → شو الخط اللي
+بتشتغل عليه؟ → الباص. No document, no licence photo, no permit, no email, no
+password, no profile picture (§5.1).
+
+**No SMS company is named anywhere in the product.** `OtpProvider` has one
+method, and three implementations sit behind it: development (hands the code
+back, and refuses to be constructed in production), SMS (through an injected
+gateway, so swapping vendors is a line of wiring), and manual — which transmits
+nothing at all, because in a market where SMS cannot be relied on, delivery is a
+person. Which channels a country may use comes from its pack.
+
+Because sign-up is a number and a code, this is the only door into a driver
+account, so: codes expire in five minutes, work exactly once, allow five
+attempts, are rate-limited per number and per caller, and are stored only as an
+HMAC under a server secret — database access alone will not brute-force six
+digits. The logger refuses to write a phone number, a code or a token at all.
+
+Numbers are normalised before anything else. `0790123456`, `+962 79 012 3456`
+and `٠٧٩٠١٢٣٤٥٦` are one driver; if they were not, he would end up with two
+accounts and lose his lines.
+
+Ops can create an **invitation** during face-to-face onboarding: a short code,
+read aloud, that puts a driver straight onto the right lines already vouched to
+tier 1. Single use, expiring, and stored hashed.
+
 ## Not built yet
 
 - The SSE endpoints for the passenger and driver streams.
 - Postgres. `live.ts` is in-memory; Redis replaces it behind the same contract.
-- OTP. The roster holds tiers and vouching, but nothing sends or checks a code.
 - Redis. Live state is in-process, which is correct at pilot scale but means a
   second instance would not share it. The contract in `live.ts` is unchanged.
 - Real key custody for phone hashes. The salt comes from the environment, which

@@ -17,7 +17,7 @@
  * it is kept strictly apart from the realtime layer: nothing here is ever handed
  * to `Service`, and a driver id must never appear in a live response (§6.4).
  */
-import { createHash, randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { corridorFromTraces, suggestCorridorWidthM } from "../../../packages/corridor/src/trace.ts";
 import { validateRoute, type Problem } from "../../../packages/corridor/src/validate.ts";
 import type { LatLng, Route, WaitPoint, Zone } from "../../../packages/corridor/src/types.ts";
@@ -55,8 +55,13 @@ export type AdminPolicy = {
   tier2Thresholds: { trips: number; distinct_days: number };
 };
 
-function hashPhone(phone: string, salt: string): string {
-  return createHash("sha256").update(`${salt}:${phone}`).digest("hex");
+/**
+ * One definition of a phone hash, shared with the OTP service. If these ever
+ * disagreed, a driver who signed in by code would not be recognised as the
+ * driver ops onboarded, and would silently lose his lines.
+ */
+export function hashPhone(phone: string, secret: string): string {
+  return createHmac("sha256", secret).update(phone).digest("hex");
 }
 
 function maskPhone(phone: string): string {

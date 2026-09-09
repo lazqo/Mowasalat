@@ -22,7 +22,8 @@ Start with the plan: [docs/PLAN.md](docs/PLAN.md).
 | `countries/jo/` | Jordan country pack: policy, and the five pilot lines ([README](countries/jo/README.md)) |
 | `docs/PLAN.md` | Product and engineering plan |
 
-Postgres holds the network and the roster; live movement stays in memory with a
+The transport API is frozen at [`/v1`](docs/API.md) — the Flutter apps can be
+built against it without backend changes. Postgres holds the network and the roster; live movement stays in memory with a
 60-second expiry and is expected to be lost on restart, which is tested both
 ways. Still to come: the two Flutter apps, driver OTP, Redis, and the
 self-hosted map stack.
@@ -38,7 +39,7 @@ Node 22.6 or newer. No dependencies and no build step — TypeScript runs direct
 through Node's type stripping.
 
 ```
-npm test                  # 164 tests across the corridor library and the API
+npm test                  # 201 tests across the corridor library and the API
 npm run api               # start the API on :3000
 npm run seed              # load a country pack into Postgres (needs DATABASE_URL)
 ADMIN_TOKEN=… PHONE_SALT=… npm run api   # also serves the ops admin at /admin
