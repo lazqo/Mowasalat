@@ -18,12 +18,12 @@ Start with the plan: [docs/PLAN.md](docs/PLAN.md).
 | Path | What |
 |---|---|
 | `packages/corridor/` | Corridor, matching and privacy library — the reference implementation ([README](packages/corridor/README.md)) |
-| `services/api/` | Backend: live state, matching, aggregates, and the enforcement that keeps coordinates off the server ([README](services/api/README.md)) |
+| `services/api/` | Backend: live state, matching, aggregates, the ops admin and corridor editor, and the enforcement that keeps coordinates off the server ([README](services/api/README.md)) |
 | `countries/jo/` | Jordan country pack: policy, and the five pilot lines ([README](countries/jo/README.md)) |
 | `docs/PLAN.md` | Product and engineering plan |
 
-Still to come: the two Flutter apps, the ops admin with its corridor editor,
-Postgres and Redis, and the self-hosted map stack.
+Still to come: the two Flutter apps, Postgres and Redis, OTP, and the
+self-hosted map stack.
 
 ## Getting started
 
@@ -31,8 +31,9 @@ Node 22.6 or newer. No dependencies and no build step — TypeScript runs direct
 through Node's type stripping.
 
 ```
-npm test                  # 87 tests across the corridor library and the API
+npm test                  # 132 tests across the corridor library and the API
 npm run api               # start the API on :3000
+ADMIN_TOKEN=… PHONE_SALT=… npm run api   # also serves the ops admin at /admin
 npm run validate:packs    # structural check on the Jordan pack
 npm run trace -- <route.json> <trace.json...>   # build a corridor from GPS traces
 ```

@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Corridor editor</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<style>
+  :root {
+    --ground:#F3F5F8; --paper:#fff; --ink:#15202B; --muted:#6F7D8B;
+    --line:#D6DDE5; --accent:#1F4FA3; --amber:#D9961A; --bad:#B3261E; --good:#1B6E3C;
+    --sans:system-ui,-apple-system,"Segoe UI",Tahoma,Arial,sans-serif;
+  }
+  * { box-sizing:border-box }
+  body { margin:0; font-family:var(--sans); color:var(--ink); background:var(--ground);
+         display:grid; grid-template-columns:340px 1fr; height:100vh; overflow:hidden }
+  #panel { background:var(--paper); border-right:1px solid var(--line); overflow-y:auto; padding:16px }
+  #map { height:100vh }
+  h1 { font-size:15px; margin:0 0 4px }
+  .sub { font-size:12px; color:var(--muted); margin:0 0 16px }
+  label { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.06em;
+          color:var(--muted); margin:14px 0 4px; font-weight:600 }
+  select, input, button { font:inherit; width:100%; padding:8px 10px; border:1px solid var(--line);
+                          border-radius:6px; background:var(--paper); color:var(--ink) }
+  button { background:var(--accent); color:#fff; border:none; font-weight:600; cursor:pointer; margin-top:8px }
+  button.ghost { background:var(--paper); color:var(--ink); border:1px solid var(--line) }
+  button:disabled { opacity:.5; cursor:default }
+  .row { display:flex; gap:8px }
+  .zones { list-style:none; padding:0; margin:8px 0 0; font-size:13px }
+  .zones li { display:flex; align-items:center; gap:8px; padding:7px 9px; border:1px solid var(--line);
+              border-radius:6px; margin-bottom:5px; background:var(--paper) }
+  .zones .seq { font-size:11px; color:var(--muted); min-width:14px }
+  .zones .kind { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em }
+  .zones .name { flex:1; font-weight:600 }
+  .zones button { width:auto; padding:2px 7px; margin:0; font-size:11px }
+  #problems { margin-top:14px; font-size:12.5px }
+  #problems .p { border-left:3px solid var(--bad); background:#FDECEA; color:#5F1512;
+                 padding:7px 10px; border-radius:0 5px 5px 0; margin-bottom:5px }
+  #problems .ok { border-left:3px solid var(--good); background:#E8F3EC; color:#123D22;
+                  padding:7px 10px; border-radius:0 5px 5px 0 }
+  .hint { font-size:12px; color:var(--muted); margin-top:6px; line-height:1.45 }
+  .badge { display:inline-block; font-size:10.5px; padding:2px 7px; border-radius:20px;
+           background:#FBF1DC; color:#6B4708; font-weight:600 }
+  .stat { display:flex; justify-content:space-between; font-size:12.5px; padding:4px 0;
+          border-bottom:1px solid var(--line) }
+  .stat b { font-variant-numeric:tabular-nums }
+</style>
+</head>
+<body>
+<div id="panel">
+  <h1>Corridor editor</h1>
+  <p class="sub">Ops owns the network. A line that fails validation is never saved.</p>
+
+  <label for="route">Line</label>
+  <select id="route"></select>
+  <div id="meta"></div>
+
+  <label for="width">Corridor width (metres)</label>
+  <div class="row">
+    <input id="width" type="number" min="100" max="5000" step="50">
+    <button id="saveWidth" style="width:auto;margin:0;padding:8px 14px">Save</button>
+  </div>
+  <p class="hint">Start generous. A driver falling outside the corridor means it is
+    drawn too tight, not that he misbehaved.</p>
+
+  <label>Zones</label>
+  <ul class="zones" id="zones"></ul>
+  <p class="hint">Click the map to add an intermediate zone. Order is the sequence
+    along the line, and it is what makes matching robust when roads vary.</p>
+
+  <label for="traces">Import recorded drives</label>
+  <input id="traces" type="file" accept=".json,.geojson" multiple>
+  <div class="row">
+    <button class="ghost" id="suggest">Suggest width</button>
+    <button id="apply">Build corridor</button>
+  </div>
+  <p class="hint">A dry run reports what the drives imply. Building replaces the
+    geometry and clears the provisional flag.</p>
+
+  <div id="problems"></div>
+</div>
+<div id="map"></div>
+
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script>
+const TILES = "__MAP_TILES__" || "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+const token = new URLSearchParams(location.search).get("token") || localStorage.getItem("adminToken") || "";
+if (token) localStorage.setItem("adminToken", token);
+
+const api = async (path, method = "GET", body) => {
+  const res = await fetch(path, {
+    method,
+    headers: { "content-type": "application/json", authorization: "Bearer " + token },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(json.error || res.statusText), { body: json });
+  return json;
+};
+
+const map = new maplibregl.Map({
+  container: "map",
+  style: {
+    version: 8,
+    sources: { osm: { type: "raster", tiles: [TILES], tileSize: 256, attribution: "© OpenStreetMap contributors" } },
+    layers: [{ id: "osm", type: "raster", source: "osm" }],
+  },
+  center: [35.8497, 32.5556],
+  zoom: 10,
+});
+
+let route = null;
+const el = (id) => document.getElementById(id);
+
+function showProblems(problems, okMessage) {
+  const box = el("problems");
+  if (!problems || problems.length === 0) {
+    box.innerHTML = okMessage ? '<div class="ok">' + okMessage + "</div>" : "";
+    return;
+  }
+  box.innerHTML = problems.map((p) => '<div class="p"><b>' + p.field + "</b> — " + p.message + "</div>").join("");
+}
+
+function renderMeta() {
+  const path = route.corridor.referencePaths[0] || [];
+  el("meta").innerHTML =
+    (route.provisional ? '<span class="badge">provisional geometry</span>' : "") +
+    '<div class="stat"><span>Reference points</span><b>' + path.length + "</b></div>" +
+    '<div class="stat"><span>Zones</span><b>' + route.corridor.zones.length + "</b></div>" +
+    '<div class="stat"><span>Wait points</span><b>' + route.waitPoints.length + "</b></div>";
+}
+
+function renderZones() {
+  el("zones").innerHTML = route.corridor.zones
+    .map((z, i) =>
+      '<li><span class="seq">' + i + '</span><span class="name">' + z.nameAr +
+      '</span><span class="kind">' + z.kind.replace("_", " ") + "</span>" +
+      (z.kind === "intermediate" ? '<button class="ghost" data-remove="' + i + '">remove</button>' : "") +
+      "</li>")
+    .join("");
+
+  for (const b of el("zones").querySelectorAll("[data-remove]")) {
+    b.onclick = () => {
+      const zones = route.corridor.zones.filter((_, i) => i !== Number(b.dataset.remove));
+      saveZones(zones);
+    };
+  }
+}
+
+function draw() {
+  const corridor = route.corridor;
+  const paths = { type: "FeatureCollection", features: corridor.referencePaths.map((p) => ({
+    type: "Feature", geometry: { type: "LineString", coordinates: p.map((c) => [c.lng, c.lat]) },
+  })) };
+  const zones = { type: "FeatureCollection", features: corridor.zones.map((z, i) => ({
+    type: "Feature", properties: { label: i + " · " + z.nameAr, kind: z.kind },
+    geometry: { type: "Point", coordinates: [z.centre.lng, z.centre.lat] },
+  })) };
+
+  map.getSource("paths").setData(paths);
+  map.getSource("zones").setData(zones);
+  map.setPaintProperty("corridor", "line-width", [
+    "interpolate", ["exponential", 2], ["zoom"],
+    10, corridor.widthM / 40, 16, corridor.widthM / 1.2,
+  ]);
+
+  const lats = corridor.referencePaths.flat().map((c) => c.lat);
+  const lngs = corridor.referencePaths.flat().map((c) => c.lng);
+  if (lats.length) {
+    map.fitBounds([[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]], { padding: 60 });
+  }
+}
+
+async function saveZones(zones) {
+  try {
+    route = await api("/admin/routes/" + route.id + "/zones", "POST", { zones });
+    renderMeta(); renderZones(); draw();
+    showProblems([], "Saved.");
+  } catch (err) {
+    showProblems(err.body?.problems || [{ field: "zones", message: err.message }]);
+  }
+}
+
+async function loadRoute(id) {
+  route = await api("/admin/routes/" + id);
+  el("width").value = route.corridor.widthM;
+  renderMeta(); renderZones(); draw();
+  showProblems([]);
+}
+
+el("saveWidth").onclick = async () => {
+  try {
+    route = await api("/admin/routes/" + route.id + "/width", "POST", { widthM: Number(el("width").value) });
+    draw();
+    showProblems([], "Width saved.");
+  } catch (err) {
+    showProblems(err.body?.problems || [{ field: "widthM", message: err.message }]);
+  }
+};
+
+map.on("click", (e) => {
+  if (!route) return;
+  const nameAr = prompt("Zone name in Arabic (a village or junction along the line)");
+  if (!nameAr) return;
+  const zones = [...route.corridor.zones];
+  const middle = { nameAr, kind: "intermediate", centre: { lat: e.lngLat.lat, lng: e.lngLat.lng }, radiusM: 600 };
+  zones.splice(zones.length - 1, 0, middle);
+  saveZones(zones);
+});
+
+async function readTraces() {
+  const files = [...el("traces").files];
+  if (files.length === 0) throw new Error("choose one or more recorded drives first");
+  return Promise.all(files.map(async (f) => {
+    const raw = JSON.parse(await f.text());
+    if (Array.isArray(raw)) return raw.map((p) => ({ lat: p.lat ?? p[1], lng: p.lng ?? p[0] }));
+    const coords = raw?.geometry?.coordinates ?? raw?.coordinates ?? [];
+    return coords.map((c) => ({ lat: c[1], lng: c[0] }));
+  }));
+}
+
+el("suggest").onclick = async () => {
+  try {
+    const { suggestion } = await api("/admin/routes/" + route.id + "/traces", "POST", { traces: await readTraces() });
+    showProblems([], "Those drives suggest " + suggestion.widthM + " m (95th percentile offset " +
+      Math.round(suggestion.percentileM) + " m, furthest " + Math.round(suggestion.maxOffsetM) + " m).");
+    el("width").value = suggestion.widthM;
+  } catch (err) {
+    showProblems([{ field: "traces", message: err.message }]);
+  }
+};
+
+el("apply").onclick = async () => {
+  try {
+    const result = await api("/admin/routes/" + route.id + "/traces", "POST", { traces: await readTraces(), apply: true });
+    route = result.route;
+    el("width").value = route.corridor.widthM;
+    renderMeta(); renderZones(); draw();
+    showProblems([], "Corridor built from the drives. Width " + result.widthM + " m.");
+  } catch (err) {
+    showProblems(err.body?.problems || [{ field: "traces", message: err.message }]);
+  }
+};
+
+map.on("load", async () => {
+  map.addSource("paths", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  map.addSource("zones", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+
+  map.addLayer({ id: "corridor", type: "line", source: "paths",
+    paint: { "line-color": "#1F4FA3", "line-opacity": 0.18, "line-width": 20 },
+    layout: { "line-cap": "round", "line-join": "round" } });
+  map.addLayer({ id: "reference", type: "line", source: "paths",
+    paint: { "line-color": "#1F4FA3", "line-width": 3 } });
+  map.addLayer({ id: "zone-dots", type: "circle", source: "zones",
+    paint: { "circle-radius": 7,
+      "circle-color": ["match", ["get", "kind"], "intermediate", "#D9961A", "#1F4FA3"],
+      "circle-stroke-width": 2, "circle-stroke-color": "#fff" } });
+  map.addLayer({ id: "zone-labels", type: "symbol", source: "zones",
+    layout: { "text-field": ["get", "label"], "text-size": 12, "text-offset": [0, 1.4] },
+    paint: { "text-color": "#15202B", "text-halo-color": "#fff", "text-halo-width": 2 } });
+
+  try {
+    const { routes } = await api("/admin/routes");
+    el("route").innerHTML = routes.map((r) => '<option value="' + r.id + '">' + r.nameAr + "</option>").join("");
+    el("route").onchange = (e) => loadRoute(e.target.value);
+    if (routes.length) await loadRoute(routes[0].id);
+  } catch (err) {
+    showProblems([{ field: "auth", message: err.message + " — open /admin?token=YOUR_ADMIN_TOKEN" }]);
+  }
+});
+</script>
+</body>
+</html>
