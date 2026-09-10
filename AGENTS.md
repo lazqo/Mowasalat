@@ -31,6 +31,17 @@ docker compose -f docker-compose.base44.yml up -d
   (208 tests). The passenger/driver apps are Flutter and cannot run in the
   browser preview; their logic is exercised via the Dart tests and the API
   suite.
+- **End-to-end verification** — the project's own script drives a driver and a
+  passenger through the live backend:
+  ```
+  docker compose -f docker-compose.base44.yml exec -d api sh -c 'PORT=3220 ADMIN_TOKEN=tok node services/api/src/http.ts'
+  docker run --rm --network container:app-api-1 -v "$PWD":/app -w /tmp dart:stable \
+    sh -c 'cp -r /app/packages/core core && cd core && dart pub get && dart run tool/e2e.dart'
+  ```
+  (kill the :3220 instance afterwards — find it by `PORT=3220` in `/proc/*/environ`).
+  Driver `0790000111` is a real roster row with an assignment to
+  `jo-irbid-malka`, created by the e2e; keep it for dev testing. OTP requests
+  are rate-limited, so leave ~30s between e2e runs.
 - **Known setup deviations from upstream** — the preview root `/` serves the
   editor (upstream only serves it at `/v1/admin`); the editor's map style
   includes a `glyphs` URL so zone labels render.
