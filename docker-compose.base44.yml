@@ -50,6 +50,9 @@ services:
       PORT: 3000
       DATABASE_URL: postgres://mowasalat:local-mowasalat-dev@db:5432/mowasalat
       REDIS_URL: redis://redis:6379
+      # The default public OSM tile server rejects the editor's tile bursts; the
+      # README already expects MAP_TILES to point elsewhere before real use.
+      MAP_TILES: https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png
     depends_on:
       setup:
         condition: service_completed_successfully
