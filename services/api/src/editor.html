@@ -102,6 +102,7 @@ const map = new maplibregl.Map({
   container: "map",
   style: {
     version: 8,
+    glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
     sources: { osm: { type: "raster", tiles: [TILES], tileSize: 256, attribution: "© OpenStreetMap contributors" } },
     layers: [{ id: "osm", type: "raster", source: "osm" }],
   },

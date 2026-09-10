@@ -67,6 +67,7 @@ test("with no token configured the ops endpoints do not serve at all", async () 
   await withApi(async (base) => {
     assert.equal((await fetch(`${base}/v1/admin/routes`)).status, 503);
     assert.equal((await fetch(`${base}/v1/admin`)).status, 503);
+    assert.equal((await fetch(`${base}/`)).status, 503);
   }, { withAdmin: false });
 });
 

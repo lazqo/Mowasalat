@@ -1,0 +1,67 @@
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: mowasalat
+      POSTGRES_PASSWORD: local-mowasalat-dev
+      POSTGRES_DB: mowasalat
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mowasalat -d mowasalat"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  setup:
+    image: node:22
+    working_dir: /app
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+    environment:
+      DATABASE_URL: postgres://mowasalat:local-mowasalat-dev@db:5432/mowasalat
+    depends_on:
+      db:
+        condition: service_healthy
+    command: sh -c 'npm ci && npm run seed'
+
+  api:
+    image: node:22
+    working_dir: /app
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+    ports:
+      - "3000:3000"
+    env_file:
+      - /run/base44/app.env
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgres://mowasalat:local-mowasalat-dev@db:5432/mowasalat
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    command: node --watch --watch-path=services/api/src --watch-path=packages/corridor/src --watch-path=countries services/api/src/http.ts
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  postgres_data:
+  node_modules:

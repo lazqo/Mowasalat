@@ -1,0 +1,19 @@
+{
+  "previewPort": 3000,
+  "healthPath": "/health",
+  "startCommand": "docker compose -f docker-compose.base44.yml up -d",
+  "secrets": [
+    {
+      "name": "ADMIN_TOKEN",
+      "description": "Ops editor bearer token. Set your own strong value in Base44 Secrets, then open /v1/admin?token=YOUR_ADMIN_TOKEN in the preview to authenticate.",
+      "requiredAtBoot": true,
+      "generatedForDevelopment": true
+    },
+    {
+      "name": "PHONE_SALT",
+      "description": "Private salt for phone hashes and development OTP signing. Keep stable to preserve roster lookups; generated securely for development.",
+      "requiredAtBoot": true,
+      "generatedForDevelopment": true
+    }
+  ]
+}

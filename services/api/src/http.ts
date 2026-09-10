@@ -601,7 +601,7 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
       }));
     }
 
-    if (method === "GET" && (path === "/v1/admin" || path === "/v1/admin/")) {
+    if (method === "GET" && (path === "/" || path === "/v1/admin" || path === "/v1/admin/")) {
       if (!admin || !adminToken) {
         return send(res, 503, { error: "ops endpoints are not configured" });
       }
