@@ -1,0 +1,309 @@
+{
+    "routes": [
+        {
+            "id": "jo-irbid-habras",
+            "nameAr": "\u0625\u0631\u0628\u062f \u2013 \u062d\u0628\u0631\u0627\u0635",
+            "originNameAr": "\u0625\u0631\u0628\u062f",
+            "destinationNameAr": "\u062d\u0628\u0631\u0627\u0635",
+            "bidirectional": true,
+            "provisional": true,
+            "corridor": {
+                "widthM": 750,
+                "referencePaths": [
+                    [
+                        {
+                            "lat": 32.5556,
+                            "lng": 35.8497
+                        },
+                        {
+                            "lat": 32.582132,
+                            "lng": 35.839239
+                        },
+                        {
+                            "lat": 32.608664,
+                            "lng": 35.828778
+                        },
+                        {
+                            "lat": 32.636,
+                            "lng": 35.818
+                        }
+                    ]
+                ],
+                "zones": [
+                    {
+                        "seq": 0,
+                        "nameAr": "\u0625\u0631\u0628\u062f",
+                        "kind": "origin_hub",
+                        "centre": {
+                            "lat": 32.5556,
+                            "lng": 35.8497
+                        },
+                        "radiusM": 800
+                    },
+                    {
+                        "seq": 1,
+                        "nameAr": "\u062d\u0628\u0631\u0627\u0635",
+                        "kind": "destination",
+                        "centre": {
+                            "lat": 32.636,
+                            "lng": 35.818
+                        },
+                        "radiusM": 800
+                    }
+                ]
+            },
+            "servedDestinations": [
+                {
+                    "id": "jo-habras",
+                    "nameAr": "\u062d\u0628\u0631\u0627\u0635",
+                    "zoneSeq": 1
+                }
+            ],
+            "waitPoints": []
+        },
+        {
+            "id": "jo-irbid-kufr-soum",
+            "nameAr": "\u0625\u0631\u0628\u062f \u2013 \u0643\u0641\u0631\u0633\u0648\u0645",
+            "originNameAr": "\u0625\u0631\u0628\u062f",
+            "destinationNameAr": "\u0643\u0641\u0631\u0633\u0648\u0645",
+            "bidirectional": true,
+            "provisional": true,
+            "corridor": {
+                "widthM": 750,
+                "referencePaths": [
+                    [
+                        {
+                            "lat": 32.5556,
+                            "lng": 35.8497
+                        },
+                        {
+                            "lat": 32.588732,
+                            "lng": 35.833959
+                        },
+                        {
+                            "lat": 32.621864,
+                            "lng": 35.818218
+                        },
+                        {
+                            "lat": 32.656,
+                            "lng": 35.802
+                        }
+                    ]
+                ],
+                "zones": [
+                    {
+                        "seq": 0,
+                        "nameAr": "\u0625\u0631\u0628\u062f",
+                        "kind": "origin_hub",
+                        "centre": {
+                            "lat": 32.5556,
+                            "lng": 35.8497
+                        },
+                        "radiusM": 800
+                    },
+                    {
+                        "seq": 1,
+                        "nameAr": "\u0643\u0641\u0631\u0633\u0648\u0645",
+                        "kind": "destination",
+                        "centre": {
+                            "lat": 32.656,
+                            "lng": 35.802
+                        },
+                        "radiusM": 800
+                    }
+                ]
+            },
+            "servedDestinations": [
+                {
+                    "id": "jo-kufr-soum",
+                    "nameAr": "\u0643\u0641\u0631\u0633\u0648\u0645",
+                    "zoneSeq": 1
+                }
+            ],
+            "waitPoints": []
+        },
+        {
+            "id": "jo-irbid-malka",
+            "nameAr": "\u0625\u0631\u0628\u062f \u2013 \u0645\u0644\u0643\u0627",
+            "originNameAr": "\u0625\u0631\u0628\u062f",
+            "destinationNameAr": "\u0645\u0644\u0643\u0627",
+            "bidirectional": true,
+            "provisional": true,
+            "corridor": {
+                "widthM": 750,
+                "referencePaths": [
+                    [
+                        {
+                            "lat": 32.5556,
+                            "lng": 35.8497
+                        },
+                        {
+                            "lat": 32.593022,
+                            "lng": 35.814819
+                        },
+                        {
+                            "lat": 32.630444,
+                            "lng": 35.779938
+                        },
+                        {
+                            "lat": 32.669,
+                            "lng": 35.744
+                        }
+                    ]
+                ],
+                "zones": [
+                    {
+                        "seq": 0,
+                        "nameAr": "\u0625\u0631\u0628\u062f",
+                        "kind": "origin_hub",
+                        "centre": {
+                            "lat": 32.5556,
+                            "lng": 35.8497
+                        },
+                        "radiusM": 800
+                    },
+                    {
+                        "seq": 1,
+                        "nameAr": "\u0645\u0644\u0643\u0627",
+                        "kind": "destination",
+                        "centre": {
+                            "lat": 32.669,
+                            "lng": 35.744
+                        },
+                        "radiusM": 800
+                    }
+                ]
+            },
+            "servedDestinations": [
+                {
+                    "id": "jo-malka",
+                    "nameAr": "\u0645\u0644\u0643\u0627",
+                    "zoneSeq": 1
+                }
+            ],
+            "waitPoints": []
+        },
+        {
+            "id": "jo-irbid-sama-alrousan",
+            "nameAr": "\u0625\u0631\u0628\u062f \u2013 \u0633\u0645\u0627 \u0627\u0644\u0631\u0648\u0633\u0627\u0646",
+            "originNameAr": "\u0625\u0631\u0628\u062f",
+            "destinationNameAr": "\u0633\u0645\u0627 \u0627\u0644\u0631\u0648\u0633\u0627\u0646",
+            "bidirectional": true,
+            "provisional": true,
+            "corridor": {
+                "widthM": 750,
+                "referencePaths": [
+                    [
+                        {
+                            "lat": 32.5556,
+                            "lng": 35.8497
+                        },
+                        {
+                            "lat": 32.598962,
+                            "lng": 35.845179
+                        },
+                        {
+                            "lat": 32.642324,
+                            "lng": 35.840658
+                        },
+                        {
+                            "lat": 32.687,
+                            "lng": 35.836
+                        }
+                    ]
+                ],
+                "zones": [
+                    {
+                        "seq": 0,
+                        "nameAr": "\u0625\u0631\u0628\u062f",
+                        "kind": "origin_hub",
+                        "centre": {
+                            "lat": 32.5556,
+                            "lng": 35.8497
+                        },
+                        "radiusM": 800
+                    },
+                    {
+                        "seq": 1,
+                        "nameAr": "\u0633\u0645\u0627 \u0627\u0644\u0631\u0648\u0633\u0627\u0646",
+                        "kind": "destination",
+                        "centre": {
+                            "lat": 32.687,
+                            "lng": 35.836
+                        },
+                        "radiusM": 800
+                    }
+                ]
+            },
+            "servedDestinations": [
+                {
+                    "id": "jo-sama-alrousan",
+                    "nameAr": "\u0633\u0645\u0627 \u0627\u0644\u0631\u0648\u0633\u0627\u0646",
+                    "zoneSeq": 1
+                }
+            ],
+            "waitPoints": []
+        },
+        {
+            "id": "jo-irbid-umm-qais",
+            "nameAr": "\u0625\u0631\u0628\u062f \u2013 \u0623\u0645 \u0642\u064a\u0633",
+            "originNameAr": "\u0625\u0631\u0628\u062f",
+            "destinationNameAr": "\u0623\u0645 \u0642\u064a\u0633",
+            "bidirectional": true,
+            "provisional": true,
+            "corridor": {
+                "widthM": 750,
+                "referencePaths": [
+                    [
+                        {
+                            "lat": 32.5556,
+                            "lng": 35.8497
+                        },
+                        {
+                            "lat": 32.587775,
+                            "lng": 35.795151
+                        },
+                        {
+                            "lat": 32.61995,
+                            "lng": 35.740602
+                        },
+                        {
+                            "lat": 32.6531,
+                            "lng": 35.6844
+                        }
+                    ]
+                ],
+                "zones": [
+                    {
+                        "seq": 0,
+                        "nameAr": "\u0625\u0631\u0628\u062f",
+                        "kind": "origin_hub",
+                        "centre": {
+                            "lat": 32.5556,
+                            "lng": 35.8497
+                        },
+                        "radiusM": 800
+                    },
+                    {
+                        "seq": 1,
+                        "nameAr": "\u0623\u0645 \u0642\u064a\u0633",
+                        "kind": "destination",
+                        "centre": {
+                            "lat": 32.6531,
+                            "lng": 35.6844
+                        },
+                        "radiusM": 800
+                    }
+                ]
+            },
+            "servedDestinations": [
+                {
+                    "id": "jo-umm-qais",
+                    "nameAr": "\u0623\u0645 \u0642\u064a\u0633",
+                    "zoneSeq": 1
+                }
+            ],
+            "waitPoints": []
+        }
+    ]
+}

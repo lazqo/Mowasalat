@@ -5,9 +5,11 @@
 library;
 
 export 'src/api.dart';
+export 'src/arabic.dart';
 export 'src/corridor.dart';
 export 'src/geo.dart';
 export 'src/models.dart';
+export 'src/passenger.dart';
 export 'src/stream.dart';
 export 'src/transport.dart';
 export 'src/trip.dart';

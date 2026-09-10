@@ -1,0 +1,27 @@
+name: mowasalat_passenger
+description: The Mowasalat passenger app — تطبيق الراكب.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  mowasalat_core:
+    path: ../../packages/core
+
+  # Fewer than the driver app needs: no foreground service, because a passenger
+  # is never tracked in the background.
+  http: ^1.2.0
+  shared_preferences: ^2.3.0
+  geolocator: ^13.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

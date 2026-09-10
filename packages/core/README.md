@@ -10,7 +10,7 @@ and the apps stay a thin shell that only draws.
 ```
 dart pub get
 dart analyze     # clean
-dart test        # 75 tests
+dart test        # 103 tests
 ```
 
 ## Tested against real responses
@@ -33,6 +33,8 @@ prove the parser agrees with itself.
 | Network loss | a lost reading is discarded, never queued for later upload |
 | Streaming | frame parsing, split chunks, duplicate suppression, reconnect, replay after reconnect, teardown |
 | Parsing | every fixture, including errors and non-JSON bodies |
+| Passenger | destination search, ride resolution, direction inference, ETA, request lifecycle |
+| Arabic search | hamza, ta marbuta, diacritics, the definite article, Eastern digits, one-edit typos |
 | Privacy | the guard below |
 
 ## The privacy guard
@@ -48,6 +50,13 @@ infrastructure; a person's live position is not.
 
 Verified by breaking it on purpose — adding a `latitude` field to
 `ProgressReport` fails three tests with a readable reason.
+
+## The two slices meet
+
+`tool/e2e.dart` drives a driver and a passenger through the real backend using
+this package's own logic — sign in, assign, start, report, search, resolve the
+ride, request, appear on the driver's stream, board, end. It is evidence rather
+than a test, and it is what should be re-run after any contract change.
 
 ## One bug worth recording
 
