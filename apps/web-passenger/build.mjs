@@ -11,15 +11,18 @@
  *
  * API_BASE is baked into the page's meta tag and into the Content-Security-
  * Policy, so a built page can talk to that API and to nothing else.
+ *
+ * OUT_DIR moves the output. The privacy tests build with it so that checking
+ * what ships does not quietly replace the build someone is running locally.
  */
 
 import { build } from "esbuild";
 import { cp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const dist = join(here, "dist");
+const dist = process.env.OUT_DIR ? resolve(process.env.OUT_DIR) : join(here, "dist");
 
 const apiBase = (process.env.API_BASE ?? "").replace(/\/$/, "");
 

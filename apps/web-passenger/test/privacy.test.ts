@@ -1,7 +1,8 @@
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 /**
@@ -15,15 +16,25 @@ import { join } from "node:path";
 
 const app = join(import.meta.dirname, "..");
 
-/** Builds exactly what would be deployed, and returns where it landed. */
+/**
+ * Builds exactly what would be deployed, into a directory this test owns —
+ * not into dist/, which someone may be serving locally while the suite runs.
+ */
 function buildInto(apiBase?: string): string {
+  const out = mkdtempSync(join(tmpdir(), "mowasalat-web-"));
+  built.push(out);
   execFileSync(process.execPath, [join(app, "build.mjs")], {
     cwd: app,
-    env: { ...process.env, API_BASE: apiBase ?? "" },
+    env: { ...process.env, API_BASE: apiBase ?? "", OUT_DIR: out },
     stdio: "pipe",
   });
-  return join(app, "dist");
+  return out;
 }
+
+const built: string[] = [];
+after(() => {
+  for (const dir of built) rmSync(dir, { recursive: true, force: true });
+});
 
 const COORDINATE_KEY = /(^|_|")(lat|latitude|lng|lon|longitude|coords?|position|location)("|_|$)/i;
 
