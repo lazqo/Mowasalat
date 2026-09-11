@@ -8,3 +8,4 @@ dist/
 .packages
 build/
 *.iml
+.env.local
