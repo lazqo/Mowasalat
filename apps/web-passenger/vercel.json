@@ -1,0 +1,19 @@
+{
+  "buildCommand": "npm run build --workspace @mowasalat/web-passenger",
+  "outputDirectory": "apps/web-passenger/dist",
+  "cleanUrls": true,
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Referrer-Policy", "value": "no-referrer" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Permissions-Policy", "value": "geolocation=(self), camera=(), microphone=(), interest-cohort=()" }
+      ]
+    },
+    {
+      "source": "/index.html",
+      "headers": [{ "key": "Cache-Control", "value": "no-store" }]
+    }
+  ]
+}

@@ -4,22 +4,32 @@
   "type": "module",
   "workspaces": [
     "packages/*",
-    "services/*"
+    "services/*",
+    "apps/web-passenger"
   ],
   "engines": {
     "node": ">=22.6"
   },
   "scripts": {
-    "test": "node --test packages/corridor/test/*.test.ts services/api/test/*.test.ts",
+    "test": "node --test packages/corridor/test/*.test.ts services/api/test/*.test.ts apps/web-passenger/test/*.test.ts",
     "validate:packs": "node packages/corridor/src/validate-pack.ts countries/jo",
     "api": "node services/api/src/http.ts",
     "trace": "node packages/corridor/src/trace-to-corridor.ts",
     "seed": "node services/api/src/db/seed.ts countries/jo",
-    "migrate": "node -e \"import('./services/api/src/db/pool.ts').then(async m=>{const p=m.createPool(process.env.DATABASE_URL);const{migrate}=await import('./services/api/src/db/migrate.ts');await migrate(p);await p.end();console.log('migrated')})\""
+    "migrate": "node -e \"import('./services/api/src/db/pool.ts').then(async m=>{const p=m.createPool(process.env.DATABASE_URL);const{migrate}=await import('./services/api/src/db/migrate.ts');await migrate(p);await p.end();console.log('migrated')})\"",
+    "build:web": "npm run build --workspace @mowasalat/web-passenger",
+    "typecheck": "tsc -p apps/web-passenger/tsconfig.json && tsc -p apps/web-passenger/tsconfig.test.json",
+    "serve:web": "node tools/serve.mjs apps/web-passenger/dist",
+    "drive:web": "node tools/drive-web.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
     "pg": "^8.23.0",
     "redis": "^6.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.2",
+    "playwright": "^1.63.0",
+    "typescript": "^5.9.3"
   }
 }

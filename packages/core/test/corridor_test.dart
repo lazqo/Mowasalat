@@ -185,6 +185,13 @@ void main() {
       expect(bucketRemaining(5123, 250), 5000);
       expect(bucketRemaining(5250, 250), 5250);
       expect(() => bucketRemaining(100, 0), throwsArgumentError);
+
+      // NaN fails every comparison, so a `<= 0` check alone would let an
+      // unconfigured band through and quietly produce NaN. A privacy control
+      // has to fail loudly when it has not been configured.
+      expect(() => bucketRemaining(100, double.nan), throwsArgumentError);
+      expect(() => bucketRemaining(100, double.infinity), throwsArgumentError);
+      expect(() => bucketRemaining(double.nan, 250), throwsArgumentError);
     });
 
     test('distances are said the way a driver would say them', () {

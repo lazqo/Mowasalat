@@ -18,6 +18,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Admin, AdminError, InvalidRoute, NotFound } from "./admin.ts";
+import { corsHeaders, corsPolicy, type CorsPolicy } from "./cors.ts";
 import { CoordinateLeak, SecretLeak } from "./guard.ts";
 import { Onboarding, Unauthorized } from "./onboarding.ts";
 import { OtpError } from "./otp/service.ts";
@@ -153,6 +154,11 @@ export type ApiOptions = {
   heartbeatMs?: number;
   /** Where stream tickets live. In process by default; Redis behind more than one instance. */
   tickets?: TicketStore;
+  /**
+   * Which web origins may call this API. Unset means none, so a deployment
+   * that has not thought about it stays closed to browsers.
+   */
+  webOrigins?: string;
 };
 
 export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
@@ -163,6 +169,7 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
   const tickets = options.tickets ?? new MemoryTicketStore();
   const streamIntervalMs = options.streamIntervalMs ?? 2_000;
   const heartbeatMs = options.heartbeatMs ?? 20_000;
+  const cors: CorsPolicy = corsPolicy(options.webOrigins);
 
   const routes: Route[] = [
     // --- passenger and driver: no coordinate may cross this boundary ---
@@ -557,6 +564,16 @@ export function createApi(policy: CountryPolicy, options: ApiOptions = {}) {
     const segments = path.split("/").filter(Boolean);
     const method = req.method ?? "GET";
 
+    // Set before any writeHead so every answer carries them: the JSON replies,
+    // the SSE streams, and the ops editor alike.
+    for (const [k, v] of Object.entries(corsHeaders(req.headers.origin, cors))) {
+      res.setHeader(k, v);
+    }
+    if (method === "OPTIONS") {
+      res.writeHead(res.getHeader("access-control-allow-origin") ? 204 : 405);
+      return res.end();
+    }
+
     if (method === "GET" && path === "/health") {
       return send(res, 200, { ok: true, ...(await service.liveCounts()) });
     }
@@ -791,6 +808,7 @@ if (process.argv[1]?.endsWith("http.ts")) {
     onboarding,
     adminToken,
     mapTiles: process.env.MAP_TILES,
+    webOrigins: process.env.WEB_ORIGINS,
     countryInfo: {
       code: pack.config.code,
       locale: pack.config.locale,

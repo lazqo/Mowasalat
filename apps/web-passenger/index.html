@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>مواصلات</title>
+
+<!--
+  Where the API lives. Replaced at deploy time, or overridden with ?api= for a
+  phone pointed at a laptop on the same wifi. Same origin when left alone.
+-->
+<meta name="api-base" content="__API_BASE__">
+
+<!--
+  Nothing is loaded from anywhere else: no fonts, no analytics, no map tiles,
+  no CDN. A third-party request from this page would tell that third party
+  roughly where the person holding it is standing, which is the one thing the
+  whole design exists to prevent. The CSP is what actually enforces it, and the
+  test suite checks this page for external URLs. connect-src is narrowed at
+  build time to the one API this deployment talks to.
+-->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src __CONNECT_SRC__; base-uri 'none'; form-action 'none'">
+
+<!-- Inline, so the page makes no request for it and no console 404 appears. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b6e4f'/%3E%3Crect x='7' y='6' width='18' height='16' rx='3' fill='%23fff'/%3E%3Crect x='9.5' y='9' width='13' height='6' rx='1.5' fill='%230b6e4f'/%3E%3Ccircle cx='11' cy='24' r='2.5' fill='%23fff'/%3E%3Ccircle cx='21' cy='24' r='2.5' fill='%23fff'/%3E%3C/svg%3E">
+
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<main id="app"><p class="note">لحظة…</p></main>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

@@ -5,7 +5,14 @@ import type { WaitPoint, Zone } from "./types.ts";
  * device. The band is the finest position the server ever holds.
  */
 export function bucketRemaining(remaining: number, bucketM: number): number {
-  if (bucketM <= 0) throw new Error("bucketM must be positive");
+  // NaN fails every comparison, so `<= 0` alone lets an unconfigured band
+  // through and quietly produces NaN — which reaches the server as a rejected
+  // request, or worse, as a position nobody bucketed. A privacy control must
+  // fail loudly when it is not configured.
+  if (!Number.isFinite(bucketM) || bucketM <= 0) {
+    throw new Error("bucketM must be a positive, finite number");
+  }
+  if (!Number.isFinite(remaining)) throw new Error("remaining must be a finite number");
   return Math.floor(remaining / bucketM) * bucketM;
 }
 

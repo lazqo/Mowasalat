@@ -1,6 +1,6 @@
 # Transport API — v1
 
-The contract the Flutter apps consume. **Frozen for the MVP screens**: the
+The contract the client apps consume. **Frozen for the MVP screens**: the
 driver and passenger vertical slices below can be built against this without any
 backend change. Anything added later goes in additively, or in `/v2`.
 
@@ -16,6 +16,22 @@ position finer than the country's band (`remainingBucketM`) is refused. See
 
 A driver's phone number never leaves the backend. Neither a phone number nor a
 driver id appears anywhere in the realtime or streaming layer.
+
+## Browsers
+
+A native app is not an origin; a web page is. `WEB_ORIGINS` names the pages
+allowed to call this API — a comma-separated list, or `*` in development.
+**Unset means no browser may call it at all**, which is what every deployment
+made before the web client existed already does.
+
+```
+WEB_ORIGINS=https://your-page.example
+```
+
+`OPTIONS` preflights are answered for a named origin and refused with 405 for
+anything else. No credential mode is offered: nothing here uses cookies, so a
+page cannot be made to act as a signed-in driver just by being visited. The
+stream endpoints carry the same headers, or `EventSource` never opens.
 
 ## Errors
 

@@ -9,8 +9,17 @@ test("remaining distance is rounded down to the band", () => {
   assert.equal(bucketRemaining(0, 250), 0);
 });
 
-test("a zero or negative band is rejected", () => {
+test("an unusable band is rejected rather than silently applied", () => {
   assert.throws(() => bucketRemaining(100, 0));
+
+  // NaN fails every comparison, so a `<= 0` check alone would let an
+  // unconfigured band through and quietly produce NaN — an unbucketed position
+  // heading for the wire. A privacy control has to fail loudly when it has not
+  // been configured.
+  assert.throws(() => bucketRemaining(100, Number.NaN), /finite/);
+  assert.throws(() => bucketRemaining(100, Number.POSITIVE_INFINITY), /finite/);
+  assert.throws(() => bucketRemaining(100, undefined as unknown as number), /finite/);
+  assert.throws(() => bucketRemaining(Number.NaN, 250), /finite/);
 });
 
 test("with enough people nearby the position is merely bucketed", () => {

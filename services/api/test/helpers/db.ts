@@ -118,7 +118,14 @@ export async function withDb(fn: (db: TestDb) => Promise<void>): Promise<void> {
  * signed-in driver's bearer token, because almost every driver endpoint needs
  * one.
  */
-export async function freshApi(opts: { adminToken?: string; streamIntervalMs?: number; heartbeatMs?: number } = {}) {
+export async function freshApi(
+  opts: {
+    adminToken?: string;
+    streamIntervalMs?: number;
+    heartbeatMs?: number;
+    webOrigins?: string;
+  } = {},
+) {
   const { createApi } = await import("../../src/http.ts");
   const db = await freshDb();
   const api = createApi(
@@ -129,6 +136,18 @@ export async function freshApi(opts: { adminToken?: string; streamIntervalMs?: n
       adminToken: opts.adminToken ?? "test-token-abcdefghijklmnop",
       streamIntervalMs: opts.streamIntervalMs,
       heartbeatMs: opts.heartbeatMs,
+      webOrigins: opts.webOrigins,
+      // What the real server serves. Without it a client reads an undefined
+      // bucket band, which is a bug worth meeting in a test rather than in
+      // Irbid.
+      countryInfo: {
+        code: "JO",
+        locale: "ar-JO",
+        digits: "eastern",
+        phonePrefix: "+962",
+        remainingBucketM: 250,
+        kAnonymityMin: 4,
+      },
     },
   );
   await new Promise<void>((r) => api.server.listen(0, r));

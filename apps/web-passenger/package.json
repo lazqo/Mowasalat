@@ -1,0 +1,12 @@
+{
+  "name": "@mowasalat/web-passenger",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs && node ../../tools/serve.mjs dist"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}

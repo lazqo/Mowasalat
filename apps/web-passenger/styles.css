@@ -1,0 +1,148 @@
+/*
+ * Large type, few colours, wide targets. The people using this include drivers'
+ * mothers and fourteen-year-olds on the way to school, on phones with cracked
+ * screens in direct sun.
+ */
+
+:root {
+  --bg: #ffffff;
+  --fg: #111418;
+  --muted: #5b6670;
+  --line: #d8dee4;
+  --accent: #0b6e4f;
+  --accent-fg: #ffffff;
+  --bus: #b4531a;
+  --you: #0b6e4f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1113;
+    --fg: #f2f4f6;
+    --muted: #9aa4ad;
+    --line: #2a3136;
+    --accent: #35a37a;
+    --accent-fg: #06130e;
+    --bus: #e08b4f;
+    --you: #35a37a;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, "Segoe UI", Tahoma, sans-serif;
+  font-size: 18px;
+  line-height: 1.5;
+}
+
+#app {
+  max-width: 32rem;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem calc(1.5rem + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-height: 100dvh;
+}
+
+h1 { font-size: 1.75rem; margin: 0; font-weight: 700; }
+
+.note { color: var(--muted); margin: 0; }
+.note.small { font-size: 0.9rem; }
+.line { font-size: 1.25rem; font-weight: 600; margin: 0; }
+
+.badge {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+  white-space: nowrap;
+}
+
+input[type="search"] {
+  width: 100%;
+  font: inherit;
+  font-size: 1.25rem;
+  padding: 0.75rem 1rem;
+  border: 2px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+}
+
+button { font: inherit; cursor: pointer; }
+
+.tile {
+  min-height: 5rem;
+  font-size: 1.35rem;
+  font-weight: 600;
+  border: 2px solid var(--line);
+  border-radius: 0.9rem;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.primary {
+  min-height: 3.75rem;
+  font-size: 1.35rem;
+  font-weight: 700;
+  border: 0;
+  border-radius: 0.9rem;
+  background: var(--accent);
+  color: var(--accent-fg);
+  margin-top: auto;
+}
+
+.quiet {
+  min-height: 3rem;
+  font-size: 1.05rem;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  text-decoration: underline;
+}
+
+.back {
+  align-self: flex-start;
+  font-size: 1.5rem;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  padding: 0;
+}
+
+.buses { list-style: none; margin: 0; padding: 0; }
+
+.buses li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0.9rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.eta { font-size: 1.35rem; font-weight: 600; }
+.gap { color: var(--muted); }
+
+.diagram { display: flex; justify-content: center; }
+.diagram .spine { stroke: var(--line); stroke-width: 4; stroke-linecap: round; }
+.diagram .zone { fill: var(--bg); stroke: var(--line); stroke-width: 3; }
+.diagram .you { fill: var(--you); }
+.diagram .bus { fill: var(--bus); }
+.diagram .bus.stopped { fill: var(--muted); }
+.diagram text { font-family: inherit; font-size: 14px; fill: var(--fg); }
+.diagram .zone-label { fill: var(--muted); }
+.diagram .you-label { font-weight: 700; fill: var(--you); }
+.diagram .bus-label { fill: var(--bus); }

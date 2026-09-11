@@ -156,7 +156,15 @@ class SpeedSmoother {
 /// Rounds a remaining-distance down to the country's band before it is sent.
 /// The backend refuses anything finer, so this is not decoration.
 double bucketRemaining(double remainingM, double bucketM) {
-  if (bucketM <= 0) throw ArgumentError.value(bucketM, 'bucketM', 'must be positive');
+  // NaN fails every comparison, so `<= 0` alone lets an unconfigured band
+  // through and quietly produces NaN. A privacy control must fail loudly when
+  // it is not configured rather than pass something unbucketed along.
+  if (!bucketM.isFinite || bucketM <= 0) {
+    throw ArgumentError.value(bucketM, 'bucketM', 'must be a positive, finite number');
+  }
+  if (!remainingM.isFinite) {
+    throw ArgumentError.value(remainingM, 'remainingM', 'must be finite');
+  }
   return (remainingM / bucketM).floor() * bucketM;
 }
 

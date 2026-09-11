@@ -9,3 +9,9 @@ dist/
 build/
 *.iml
 .env.local
+
+# Screenshots written by tools/drive-web.mjs
+apps/web-passenger/screenshot-*.png
+
+# Dart libraries do not pin their dependants (apps do)
+packages/*/pubspec.lock

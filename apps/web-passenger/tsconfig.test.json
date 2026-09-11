@@ -1,0 +1,15 @@
+{
+  // The tests may use Node APIs; the app itself may not, which is why this is
+  // a separate config rather than one permissive one.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "skipLibCheck": true
+  },
+  "include": ["test/**/*.ts", "src/**/*.ts"],
+  // e2e.test.ts imports the backend's own test helpers to run against a real
+  // server. Typechecking it would pull services/api into this project, which
+  // has never been typechecked and does not pass today. It still runs under
+  // `node --test` with the rest of the suite.
+  "exclude": ["test/e2e.test.ts"]
+}

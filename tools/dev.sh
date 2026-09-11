@@ -54,6 +54,12 @@ set -a; . ./.env.local; set +a
 # for an SMS. The provider that does this refuses to exist in production.
 export NODE_ENV="${NODE_ENV:-development}"
 
+# The web passenger page is a browser origin, and a browser will not call an API
+# that has not named it. Locally the page is served from whatever address the
+# laptop happens to have, so any origin is allowed here. A deployment sets this
+# to the one page it serves.
+export WEB_ORIGINS="${WEB_ORIGINS:-*}"
+
 # --- The pilot lines ----------------------------------------------------------
 say "loading the five Irbid ↔ Bani Kinana lines"
 npm run --silent seed
@@ -74,7 +80,9 @@ cat <<INFO
   Ops admin           http://localhost:$API_PORT/v1/admin?token=$ADMIN_TOKEN
 
   Build the apps against:
-    --dart-define=API_BASE=http://${LAN_IP:-YOUR_IP}:$API_PORT
+    Flutter   --dart-define=API_BASE=http://${LAN_IP:-YOUR_IP}:$API_PORT
+    Web       API_BASE=http://${LAN_IP:-YOUR_IP}:$API_PORT npm run build:web
+              then  node tools/serve.mjs apps/web-passenger/dist
 
   Open the phone address in the phone's browser first. If it does not load,
   it is the WiFi, not the app.
