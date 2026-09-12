@@ -265,7 +265,8 @@ function view(): string {
         <h1>${Ar.whereTo}</h1>
         <input id="q" type="search" inputmode="search" placeholder="${Ar.search}"
                value="${esc(screen.query)}" autocomplete="off">
-        <div id="results">${destinationList(screen.query)}</div>`;
+        <div id="results">${destinationList(screen.query)}</div>
+        <p class="credit">${Ar.mapCredit}</p>`;
 
     case "locating":
       return `

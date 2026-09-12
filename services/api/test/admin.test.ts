@@ -55,11 +55,18 @@ test("a broken edit is never written", async () => {
 });
 
 test("problems can be checked without saving", async () => {
-  await withAdmin(async (admin) => {
+  await withAdmin(async (admin, restart) => {
     const route = await admin.getRoute(ROUTE);
     const problems = admin.check({ ...route, corridor: { ...route.corridor, widthM: 10 } });
-    assert.equal(problems.length, 1);
-    assert.equal(problems[0].field, "corridor.widthM");
+
+    // Not a count: a 10 m corridor is wrong in more than one way, and which
+    // other problems it implies depends on the line's geometry. What matters
+    // is that the width is reported and that nothing was written.
+    assert.ok(
+      problems.some((p) => p.field === "corridor.widthM"),
+      `expected the width to be flagged, got ${JSON.stringify(problems)}`,
+    );
+    assert.equal((await restart().getRoute(ROUTE)).corridor.widthM, route.corridor.widthM);
   });
 });
 

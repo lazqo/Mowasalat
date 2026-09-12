@@ -20,7 +20,8 @@
     "build:web": "npm run build --workspace @mowasalat/web-passenger",
     "typecheck": "tsc -p apps/web-passenger/tsconfig.json && tsc -p apps/web-passenger/tsconfig.test.json",
     "serve:web": "node tools/serve.mjs apps/web-passenger/dist",
-    "drive:web": "node tools/drive-web.mjs"
+    "drive:web": "node tools/drive-web.mjs",
+    "build:routes": "node packages/corridor/src/build-route.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",

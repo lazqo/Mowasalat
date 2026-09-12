@@ -106,3 +106,13 @@ test("nothing about her is kept, only the public network", () => {
 
   assert.doesNotMatch(source, /setItem\([^)]*(pseudonym|position|ride|destination)/i);
 });
+
+test("the OpenStreetMap attribution ships with the page", () => {
+  // The corridors are derived from OSM and stored in the pack. The ODbL allows
+  // that on condition of attribution — which is precisely why a commercial
+  // routing API was not used, since those forbid storing the result at all.
+  // Dropping this line silently turns a licensed use into an unlicensed one.
+  const dist = buildInto();
+  const js = readFileSync(join(dist, "app.js"), "utf8");
+  assert.match(js, /OpenStreetMap/);
+});

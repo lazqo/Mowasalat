@@ -375,6 +375,49 @@ Drivers already know how to get from Irbid to Malka, and the road they take vari
 
 The table is small — sampling every ~100 m over a 20 km line is a couple of thousand entries per direction — so shipping it in the country pack costs almost nothing and keeps everything offline-capable.
 
+### 9.2a Corridors are generated from the roads, then corrected in the field
+
+A routing engine already knows where the road goes, so it does the first pass:
+origin and destination in, the real road out, including the genuine
+alternatives. `npm run build:routes -- countries/<cc>/routes/*.json --write`
+does this for a whole pack.
+
+Three constraints shape how this is used.
+
+**It is an ops-time tool, never a runtime one.** A corridor is generated once,
+on a laptop, when a line is created or corrected, and stored in our own
+database. No phone ever calls a routing or tile service, because doing so
+would tell that service where the person holding it is standing — precisely
+the disclosure §6 exists to prevent.
+
+**The licence has to permit storing the result.** This rules out the
+commercial routing APIs: Google's terms forbid caching or storing what
+Directions returns and forbid drawing it on a non-Google map, and storing the
+route *is* the feature here. OSRM, Valhalla and GraphHopper over OpenStreetMap
+permit it under the ODbL, whose condition is attribution — carried in the pack
+and on the passenger page.
+
+**A router is not a survey.** It answers "where does the road go", not "which
+road do the drivers take", where they actually stop, or what passengers call
+the place. A generated line stays `provisional` and §12.1 still applies; what
+changes is that Phase 0 starts from the real road instead of a straight line.
+
+That difference is not cosmetic. The five pilot lines were carrying
+straight-line placeholder geometry, and measured against the actual roads,
+between 46% and 85% of each road fell outside its own corridor — on إربد – أم
+قيس, a bus would have been invisible for 19.8 km of a 28.8 km trip, and every
+ETA was 17–34% short. None of that would have shown up in a test; it would
+have shown up as the app not working, in Irbid, in front of drivers.
+
+**A second road is a second reference path, not a wider corridor.** The two
+roads between إربد and ملكا diverge by about six kilometres. One corridor wide
+enough to hold both would be twelve kilometres across — it would call a bus
+three villages away "on the line", make remaining-distance useless as an ETA,
+and capture exactly the private detours that going silent off-corridor
+(§6.1) exists to keep private. Two paths, each a few hundred metres wide,
+describe the same reality with none of that. This is why `referencePaths` is a
+list.
+
 ### 9.3 Corridor width is a tuning knob, not a constant
 
 Width is per line, set by ops, and starts generous. **A driver falling outside the corridor is treated as evidence the corridor is drawn wrong, not that the driver misbehaved.** The `CorridorFit` counter (§6.3) reports how often that happens per line and zone, so ops widens corridors from real data during the pilot rather than guessing up front. The driver app says "you seem to have left the line" rather than silently going dark.
@@ -465,7 +508,7 @@ Rough total to pilot launch: **~5 months**.
 
 - Which hub or موقف in Irbid the line actually departs from.
 - Origin and destination zones.
-- The roads drivers commonly use, including alternatives — enough to draw a corridor, not a survey.
+- **Which** of the generated roads drivers commonly use, and any alternative the router did not find. The geometry now starts from the real road network (§9.2a), so this is confirmation rather than tracing — but it is still the question a router cannot answer.
 - Intermediate villages and areas the line serves.
 - Recognised passenger waiting points.
 - Approximate journey time and frequency, by time of day.

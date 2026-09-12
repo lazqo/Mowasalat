@@ -33,6 +33,13 @@ export const Ar = {
   loadFailed: "ما قدرنا نوصل للخدمة",
 
   you: "إنت",
+
+  /**
+   * Required, not decorative. The corridors are derived from OpenStreetMap and
+   * stored, which the ODbL permits on condition of attribution — unlike the
+   * commercial routing APIs, which forbid storing the result at all.
+   */
+  mapCredit: "بيانات الطرق من OpenStreetMap",
   provisional: "الخط لسا تحت التجربة",
 
   /** "بضل ١٢ دقيقة" */

@@ -136,6 +136,13 @@ button { font: inherit; cursor: pointer; }
 .eta { font-size: 1.35rem; font-weight: 600; }
 .gap { color: var(--muted); }
 
+.credit {
+  margin: auto 0 0;
+  padding-top: 1rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
 .diagram { display: flex; justify-content: center; }
 .diagram .spine { stroke: var(--line); stroke-width: 4; stroke-linecap: round; }
 .diagram .zone { fill: var(--bg); stroke: var(--line); stroke-width: 3; }

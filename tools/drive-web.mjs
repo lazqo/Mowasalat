@@ -16,6 +16,7 @@
  */
 
 import { chromium } from "playwright";
+import { indexCorridor, place, remainingM as remainingAlong, bucketRemaining } from "../packages/corridor/src/index.ts";
 
 const API = process.env.API_BASE ?? "http://localhost:3000";
 const PAGE = process.env.PAGE_URL ?? "http://localhost:5173";
@@ -61,13 +62,30 @@ await post(`/v1/admin/drivers/${session.driver.id}/routes`, { routeId: ROUTE }, 
 const { body: trip } = await post("/v1/trips", { routeId: ROUTE, dir: 0 }, session.driverToken);
 check(Boolean(trip.tripToken), "a driver starts a trip");
 
-// Behind her, so he still has to pass where she is standing.
+// Where he has to be for her to see him: behind where she is standing, so the
+// ground she is on is ground he has not covered yet. Derived from the line's
+// own geometry rather than hardcoded, because the geometry changes whenever
+// the roads are rebuilt and a stale constant would silently stop testing this.
+const { remainingBucketM } = await fetch(`${API}/v1/country`).then((r) => r.json());
+const { routes } = await fetch(`${API}/v1/routes`).then((r) => r.json());
+const line = routes.find((r) => r.id === ROUTE);
+const indexed = indexCorridor(line.corridor);
+const hers = remainingAlong(place({ lat: AT.latitude, lng: AT.longitude }, indexed), indexed, 0);
+const BEHIND_M = 4000;
+
 const progress = await post(
   "/v1/trips/progress",
-  { tripToken: trip.tripToken, routeId: ROUTE, dir: 0, remainingM: 20_000, zoneSeq: 0, speedKph: 40 },
+  {
+    tripToken: trip.tripToken,
+    routeId: ROUTE,
+    dir: 0,
+    remainingM: bucketRemaining(hers + BEHIND_M, remainingBucketM),
+    zoneSeq: 0,
+    speedKph: 40,
+  },
   session.driverToken,
 );
-check(progress.status === 200, "and reports progress");
+check(progress.status === 200, `and reports progress ${(BEHIND_M / 1000).toFixed(0)} km behind her`);
 
 // --- the page ----------------------------------------------------------------
 
